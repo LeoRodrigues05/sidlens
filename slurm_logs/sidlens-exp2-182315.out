@@ -1,0 +1,77 @@
+[gate] verifying frozen substrate...
+snapshot base-20260826
+  [ok  ] vendor/onediffrec
+  [ok  ] vendor/diffgrm
+  [ok  ] vendor/diffgrm_new
+  [ok  ] sids/index_json
+  [ok  ] sids/mispacked
+  [ok  ] sids/sem_ids/diffgrm
+  [ok  ] sids/sem_ids/diffgrm_new
+  [ok  ] sids/mappings
+  [ok  ] sids/info/next-item
+  [ok  ] sids/info/two-item
+  [ok  ] data/embeddings
+  [ok  ] data/item_meta
+  [ok  ] data/id_maps
+  [ok  ] data/interactions
+  [ok  ] data/reviews
+  [ok  ] data/splits/next-item/train
+  [ok  ] data/splits/next-item/valid
+  [ok  ] data/splits/next-item/test
+  [ok  ] data/splits/two-item/train
+  [ok  ] data/splits/two-item/valid
+  [ok  ] data/splits/two-item/test
+  [ok  ] data/sequences
+  [ok  ] ckpt/diffusion/next1
+  [ok  ] ckpt/diffusion/next1_logs
+  [ok  ] ckpt/diffusion/next2
+  [ok  ] ckpt/diffusion/next2_logs
+  [ok  ] ckpt/ar/next-item_best
+  [ok  ] ckpt/ar/two-item_best
+  [ok  ] ckpt/ar/oneoff_rqvae4cb128
+  [ok  ] ckpt/ar/best_variant_labels
+  [ok  ] base_models/qwen2.5-1.5b-instruct
+  [ok  ] results/sweep_metrics
+  [ok  ] results/sweep_state
+  [ok  ] results/diffusion_transcripts/next1
+  [ok  ] results/diffusion_transcripts/next2
+  [ok  ] results/wandb
+  [ok  ] results/job_manifests
+  [ok  ] results/diagram_data/v1
+  [ok  ] results/diagram_data/v2
+  [ok  ] results/collision_workbook
+  [ok  ] results/slurm_logs
+
+VERIFY OK
+[gate] ok
+[exp2] starting 2026-08-26T18:24:54+04:00
+  MQ_3codebook_128             R2_final=0.1347  collision=40.10%  unique= 1860
+  MQ_3codebook_256             R2_final=0.0673  collision=29.15%  unique= 2200
+  MQ_3codebook_512             R2_final=0.0285  collision=19.97%  unique= 2485
+  MQ_4codebook_128             R2_final=0.0637  collision=25.54%  unique= 2312
+  MQ_4codebook_256             R2_final=0.0316  collision=19.42%  unique= 2502
+  MQ_4codebook_512             R2_final=0.0138  collision=14.56%  unique= 2653
+  MQ_5codebook_128             R2_final=0.0357  collision=17.94%  unique= 2548
+  MQ_5codebook_256             R2_final=0.0185  collision=15.68%  unique= 2618
+  MQ_5codebook_512             R2_final=0.0092  collision=11.92%  unique= 2735
+  rqkmeans_3codebook_128       R2_final=0.0422  collision=29.31%  unique= 2195
+  rqkmeans_3codebook_256       R2_final=0.0144  collision=19.16%  unique= 2510
+  rqkmeans_3codebook_512       R2_final=0.0031  collision= 9.57%  unique= 2808
+  rqkmeans_4codebook_128       R2_final=0.0136  collision=18.65%  unique= 2526
+  rqkmeans_4codebook_256       R2_final=0.0047  collision=12.14%  unique= 2728
+  rqkmeans_4codebook_512       R2_final=0.0009  collision= 5.57%  unique= 2932
+  rqkmeans_5codebook_128       R2_final=0.0064  collision=13.75%  unique= 2678
+  rqkmeans_5codebook_256       R2_final=0.0020  collision= 8.79%  unique= 2832
+  rqkmeans_5codebook_512       R2_final=0.0001  collision= 0.35%  unique= 3094
+  rqvae_3codebook_128          R2_final=0.0026  collision= 1.16%  unique= 3069
+  rqvae_3codebook_256          R2_final=0.0015  collision= 1.06%  unique= 3072
+  rqvae_3codebook_512          R2_final=0.0000  collision= 0.39%  unique= 3093
+  rqvae_4codebook_128          R2_final=0.0000  collision= 0.39%  unique= 3093
+  rqvae_4codebook_256          R2_final=0.0000  collision= 0.35%  unique= 3094
+  rqvae_4codebook_512          R2_final=0.0000  collision= 0.35%  unique= 3094
+  rqvae_5codebook_128          R2_final=0.0000  collision= 0.35%  unique= 3094
+  rqvae_5codebook_256          R2_final=0.0000  collision= 1.00%  unique= 3074
+  rqvae_5codebook_512          R2_final=0.0000  collision= 0.35%  unique= 3094
+
+wrote 135 depth, 432 size, 27 collision, 108 utilization rows -> /l/users/leo.rodrigues/sidlens/derived/exp2_geometry
+[exp2] done 2026-08-26T18:25:23+04:00

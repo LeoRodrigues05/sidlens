@@ -1,0 +1,6 @@
+/var/lib/slurm-llnl/slurmd/job182312/slurm_script: line 19: /var/lib/slurm-llnl/slurmd/job182312/_preamble.sh: No such file or directory
+/var/lib/slurm-llnl/slurmd/job182312/slurm_script: line 22: sidlens_gate: command not found
+/var/lib/slurm-llnl/slurmd/job182312/slurm_script: line 23: sidlens_provenance_stamp: command not found
+[exp2] starting 2026-08-26T18:21:50+04:00
+/var/lib/slurm-llnl/slurmd/job182312/slurm_script: line 26: : command not found
+[exp2] done 2026-08-26T18:21:50+04:00
