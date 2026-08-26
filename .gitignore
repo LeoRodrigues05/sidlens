@@ -6,3 +6,4 @@ build/
 dist/
 # Bulk artifacts live on /l/users, never in git.
 scratch/
+venv/

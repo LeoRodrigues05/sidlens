@@ -46,7 +46,7 @@ RE_USERS = re.compile(r"Number of users: (\d+)")
 RE_ITEMS = re.compile(r"Number of items: (\d+)")
 RE_INTER = re.compile(r"Number of interactions: (\d+)")
 RE_TEST_RESULTS = re.compile(r"Test Results: (OrderedDict\(.*\))")
-RE_BEST_VAL = re.compile(r"[Bb]est (?:validation|val) .*?([\d.]+)")
+RE_BEST = re.compile(r"Best epoch: (\d+), Best val score: ([\d.]+)")
 
 
 def _count_blocks(text: str, name: str) -> int | None:
@@ -121,6 +121,8 @@ class ParsedRun:
     n_interactions: int | None = None
     # outcome
     total_parameters: int | None = None
+    best_epoch: int | None = None
+    best_val_score: float | None = None
     test_results: dict = field(default_factory=dict)
     # bookkeeping
     sources: list[str] = field(default_factory=list)
@@ -184,6 +186,8 @@ def parse_text(text: str, into: ParsedRun | None = None) -> ParsedRun:
         p.guided_select = m.group(3)
     if m := RE_PARAMS.search(text):
         p.total_parameters = int(m.group(1).replace(",", ""))
+    if m := RE_BEST.search(text):
+        p.best_epoch, p.best_val_score = int(m.group(1)), float(m.group(2))
     if m := RE_USERS.search(text):
         p.n_users = int(m.group(1))
     if m := RE_ITEMS.search(text):
@@ -194,6 +198,27 @@ def parse_text(text: str, into: ParsedRun | None = None) -> ParsedRun:
     if results := parse_test_results(text):
         p.test_results = results
     return p
+
+
+def canonical_metric(results: dict, name: str) -> float | None:
+    """Look up a metric across the two naming conventions in play.
+
+    The one-item evaluator emits `ndcg@10` / `recall@10`; the two-item trainer's
+    two-pass branch emits `NDCG@10` / `HR@10` with partial pair credit. Callers
+    that just want "the ndcg@10 of this run" should not have to know which.
+    """
+    aliases = {
+        "ndcg@10": ("ndcg@10", "NDCG@10"),
+        "ndcg@5": ("ndcg@5", "NDCG@5"),
+        "ndcg@3": ("ndcg@3", "NDCG@3"),
+        "recall@10": ("recall@10", "HR@10"),
+        "recall@5": ("recall@5", "HR@5"),
+        "recall@3": ("recall@3", "HR@3"),
+    }
+    for key in aliases.get(name, (name,)):
+        if key in results:
+            return results[key]
+    return None
 
 
 def parse_run(log_path: Path | None, transcript_path: Path | None) -> ParsedRun:
