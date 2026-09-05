@@ -7,3 +7,7 @@ dist/
 # Bulk artifacts live on /l/users, never in git.
 scratch/
 venv/
+
+# The 1.6 GB upstream data tarball the user drops in data/. Extracted to
+# $SIDLENS_WORK/external/onediffrec_data and hashed there.
+data/*.tar.gz

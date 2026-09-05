@@ -9,7 +9,7 @@ set -euo pipefail
 # sidlens_gate undefined, and the job carried on past a "command not found"
 # and reported success having done nothing.
 
-SIDLENS_REPO="${SIDLENS_REPO:-/home/leo.rodrigues/onediffrec/sidlens}"
+SIDLENS_REPO="${SIDLENS_REPO:-/home/leo.rodrigues/GenRecSys/sidlens/sidlens}"
 export SIDLENS_WORK="${SIDLENS_WORK:-/l/users/leo.rodrigues/sidlens}"
 PYBIN="${SIDLENS_WORK}/venv/bin/python"
 

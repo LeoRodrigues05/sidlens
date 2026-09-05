@@ -21,6 +21,13 @@ DERIVED = WORK / "derived"
 RUNS = WORK / "runs"
 CACHE = WORK / "cache"
 
+# Third-party data pulled in AFTER the freeze -- public dumps, re-downloads of
+# things upstream stripped. Deliberately NOT under FROZEN: the frozen substrate
+# is the bytes the models were trained on and must stay exactly that. External
+# data is evidence we join against it, and it carries its own manifest so the
+# two can never be confused.
+EXTERNAL = WORK / "external"
+
 # --- upstream, READ-ONLY -----------------------------------------------------
 # Never written to. `freeze` reads from here exactly once; everything else
 # reads from FROZEN.

@@ -6,6 +6,7 @@ namespace package's __file__ is None) while frozen and unfrozen modules are
 silently interleaved in the same import graph.
 """
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -14,7 +15,22 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-LIVE_TREE = "/home/leo.rodrigues/onediffrec/OneDiffRec/DiffGRM"
+
+# The unfrozen upstream tree. Three cases below exist to prove the guard strips
+# it out of `genrec.__path__`; they can only do that if it is actually on disk.
+# It is currently absent -- the upstream checkout this project was carved out of
+# is gone from this machine, which is also why `paths.UPSTREAM_REPO` no longer
+# resolves. Without it those cases cannot construct the leak they test for, so
+# they SKIP rather than fail: a failure would say "the guard is broken", and the
+# true statement is "the guard is unverified here". The distinction matters,
+# because the second one is the one that should make somebody uncomfortable.
+LIVE_TREE = os.environ.get(
+    "SIDLENS_LIVE_TREE", "/home/leo.rodrigues/onediffrec/OneDiffRec/DiffGRM")
+needs_live_tree = pytest.mark.skipif(
+    not Path(LIVE_TREE).is_dir(),
+    reason=f"live upstream tree absent at {LIVE_TREE}; the vendor guard's "
+           f"anti-leak behaviour is UNVERIFIED in this environment. Set "
+           f"SIDLENS_LIVE_TREE to a real DiffGRM checkout to run these.")
 
 
 def run_isolated(body: str, pythonpath: str) -> subprocess.CompletedProcess:
@@ -47,6 +63,7 @@ def test_clean_activation_resolves_only_vendor():
     assert "OK" in r.stdout, r.stderr
 
 
+@needs_live_tree
 def test_live_tree_on_pythonpath_is_stripped():
     """The live tree must not join genrec.__path__ even when importable."""
     r = run_isolated("""
@@ -61,6 +78,7 @@ def test_live_tree_on_pythonpath_is_stripped():
     assert "OK" in r.stdout, r.stderr
 
 
+@needs_live_tree
 def test_pre_imported_live_genrec_is_recovered():
     """Importing the live tree first must not poison the process."""
     r = run_isolated("""
@@ -76,6 +94,7 @@ def test_pre_imported_live_genrec_is_recovered():
     assert "OK" in r.stdout, r.stderr
 
 
+@needs_live_tree
 def test_tampering_after_activation_raises():
     r = run_isolated("""
         import sys

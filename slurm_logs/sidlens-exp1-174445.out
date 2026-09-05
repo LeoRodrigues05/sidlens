@@ -1,0 +1,516 @@
+[gate] verifying frozen substrate...
+snapshot base-20260826
+  [ok  ] vendor/onediffrec
+  [ok  ] vendor/diffgrm
+  [ok  ] vendor/diffgrm_new
+  [ok  ] sids/index_json
+  [ok  ] sids/mispacked
+  [ok  ] sids/sem_ids/diffgrm
+  [ok  ] sids/sem_ids/diffgrm_new
+  [ok  ] sids/mappings
+  [ok  ] sids/info/next-item
+  [ok  ] sids/info/two-item
+  [ok  ] data/embeddings
+  [ok  ] data/item_meta
+  [ok  ] data/id_maps
+  [ok  ] data/interactions
+  [ok  ] data/reviews
+  [ok  ] data/splits/next-item/train
+  [ok  ] data/splits/next-item/valid
+  [ok  ] data/splits/next-item/test
+  [ok  ] data/splits/two-item/train
+  [ok  ] data/splits/two-item/valid
+  [ok  ] data/splits/two-item/test
+  [ok  ] data/sequences
+  [ok  ] ckpt/diffusion/next1
+  [ok  ] ckpt/diffusion/next1_logs
+  [ok  ] ckpt/diffusion/next2
+  [ok  ] ckpt/diffusion/next2_logs
+  [ok  ] ckpt/ar/next-item_best
+  [ok  ] ckpt/ar/two-item_best
+  [ok  ] ckpt/ar/oneoff_rqvae4cb128
+  [ok  ] ckpt/ar/best_variant_labels
+  [ok  ] base_models/qwen2.5-1.5b-instruct
+  [ok  ] results/sweep_metrics
+  [ok  ] results/sweep_state
+  [ok  ] results/diffusion_transcripts/next1
+  [ok  ] results/diffusion_transcripts/next2
+  [ok  ] results/wandb
+  [ok  ] results/job_manifests
+  [ok  ] results/diagram_data/v1
+  [ok  ] results/diagram_data/v2
+  [ok  ] results/collision_workbook
+  [ok  ] results/slurm_logs
+
+VERIFY OK
+[gate] ok
+[exp1] checking the external label join
+[labels] Industrial_and_Scientific: 3105 items in the frozen catalogue
+[labels] scanning meta_Industrial_and_Scientific.json.gz (84 MB)
+[labels] 167442 records scanned, 133 duplicate ASINs ignored
+[labels] JOIN 3105/3105 = 100.0%
+[labels] coverage over the full catalogue
+          main_cat      3100/3105 ( 99.8%)  distinct=   19  items/value=  163.16
+          cat_l1        3003/3105 ( 96.7%)  distinct=   25  items/value=  120.12
+          cat_l2        2926/3105 ( 94.2%)  distinct=  181  items/value=   16.17
+          cat_l3        2427/3105 ( 78.2%)  distinct=  372  items/value=    6.52
+          cat_leaf      3003/3105 ( 96.7%)  distinct=  657  items/value=    4.57
+          brand_ext     3095/3105 ( 99.7%)  distinct= 1187  items/value=    2.61
+          price_usd     2545/3105 ( 82.0%)  distinct= 1283  items/value=    1.98
+          rank          3056/3105 ( 98.4%)  distinct= 3008  items/value=    1.02
+          also_buy      2418/3105 ( 77.9%)  distinct= 2414  items/value=    1.00
+          feature       2005/3105 ( 64.6%)  distinct= 1889  items/value=    1.06
+          details       1545/3105 ( 49.8%)  distinct= 1543  items/value=    1.00
+[labels] --check: nothing written
+[exp1] starting 2026-09-05T05:14:05+04:00
+[exp1] metadata coverage
+        title        non_empty= 3105/3105 distinct= 3068 mean_items_per_value=1.01
+        brand        non_empty= 3095/3105 distinct= 1187 mean_items_per_value=2.61
+        description  non_empty= 2899/3105 distinct= 2707 mean_items_per_value=1.07
+        categories   non_empty=    0/3105 distinct=    0 mean_items_per_value=0.00
+[exp1] recovered label coverage (external, Amazon-2018 join)
+        also_buy        2418/3105 ( 77.9%)  distinct= 2414  USABLE
+        brand_ext       3095/3105 ( 99.7%)  distinct= 1187  gated: 1187 distinct over 3095 labelled items (ratio 0.38 > 0.25) -- this is an identity column, not a class column
+        cat_l1          3003/3105 ( 96.7%)  distinct=   25  USABLE
+        cat_l2          2926/3105 ( 94.2%)  distinct=  181  USABLE
+        cat_l3          2427/3105 ( 78.2%)  distinct=  372  gated: off by default; pass force=True to use it
+        cat_leaf        3003/3105 ( 96.7%)  distinct=  657  gated: off by default; pass force=True to use it
+        main_cat        3100/3105 ( 99.8%)  distinct=   19  USABLE
+        price_decile    2545/3105 ( 82.0%)  distinct= 1283  USABLE
+        price_usd       2545/3105 ( 82.0%)  distinct= 1283  USABLE
+        rank            3056/3105 ( 98.4%)  distinct= 3008  USABLE
+        rank_decile     3056/3105 ( 98.4%)  distinct= 3008  USABLE
+[exp1] MQ_3codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.339/0.339   d1:0.344/0.205*  d2:0.303/0.145*
+          cat_l2        d0:0.375/0.375   d1:0.363/0.236*  d2:0.332/0.199*
+          main_cat      d0:0.096/0.096   d1:0.091/0.093*  d2:0.086/0.035*
+          price_decile  d0:0.046/0.046   d1:0.040/0.038*  d2:0.041/0.046*
+          rank_decile   d0:0.017/0.017   d1:0.027/0.047*  d2:0.021/0.023*
+          cat_l3        d0:0.373/0.373   d1:0.332/0.231*  d2:0.318/0.193*
+        co-purchase preservation (same-prefix rate / chance)
+          d0:5.8x  d1:19.8x  d2:40.6x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.85(97/111)  d1:0.69(78/214)  d2:0.58(24/112)
+        digit 0:  125 cells (125 codes used),  122 multi-item (median 15 items, radius 34.54, shrink 0.749, brand purity 0.301); 0% of catalogue now alone
+        digit 1: 1053 cells (125 codes used),  467 multi-item (median 3 items, radius 25.63, shrink 0.721, brand purity 0.514); 19% of catalogue now alone
+        digit 2: 1860 cells (121 codes used),  448 multi-item (median 2 items, radius 19.98, shrink 0.820, brand purity 0.628); 45% of catalogue now alone
+[exp1] MQ_3codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.321/0.321   d1:0.313/0.188*  d2:0.336/0.137*
+          cat_l2        d0:0.363/0.363   d1:0.354/0.250*  d2:0.371/0.163*
+          main_cat      d0:0.098/0.098   d1:0.102/0.097*  d2:0.105/0.104*
+          price_decile  d0:0.049/0.049   d1:0.047/0.055*  d2:0.050/0.099*
+          rank_decile   d0:0.023/0.023   d1:0.019/0.027*  d2:0.031/0.050*
+          cat_l3        d0:0.373/0.373   d1:0.359/0.263*  d2:0.374/0.196*
+        co-purchase preservation (same-prefix rate / chance)
+          d0:9.3x  d1:34.6x  d2:81.3x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.83(125/179)  d1:0.62(47/184)  d2:0.75(7/65)
+        digit 0:  238 cells (238 codes used),  216 multi-item (median 10 items, radius 30.68, shrink 0.665, brand purity 0.399); 1% of catalogue now alone
+        digit 1: 1420 cells (237 codes used),  558 multi-item (median 3 items, radius 21.85, shrink 0.689, brand purity 0.581); 28% of catalogue now alone
+        digit 2: 2200 cells (233 codes used),  424 multi-item (median 2 items, radius 16.72, shrink 0.875, brand purity 0.696); 57% of catalogue now alone
+[exp1] MQ_3codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.301/0.301   d1:0.293/0.188*  d2:0.305/0.059~ 
+          cat_l2        d0:0.347/0.347   d1:0.336/0.240*  d2:0.345/0.074~ 
+          main_cat      d0:0.090/0.090   d1:0.087/0.087*  d2:0.094/0.027 
+          price_decile  d0:0.044/0.044   d1:0.043/0.034*  d2:0.044/0.081*
+          rank_decile   d0:0.026/0.026   d1:0.023/0.051*  d2:0.027/0.042 
+          cat_l3        d0:0.369/0.369   d1:0.361/0.268*  d2:0.365/0.196~*
+        co-purchase preservation (same-prefix rate / chance)
+          d0:18.3x  d1:75.9x  d2:110.9x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.79(134/268)  d1:0.81(20/125)  d2:0.78(1/30)
+        digit 0:  430 cells (430 codes used),  371 multi-item (median 6 items, radius 28.74, shrink 0.623, brand purity 0.446); 2% of catalogue now alone
+        digit 1: 1902 cells (431 codes used),  542 multi-item (median 2 items, radius 18.85, shrink 0.673, brand purity 0.641); 44% of catalogue now alone
+        digit 2: 2485 cells (436 codes used),  334 multi-item (median 2 items, radius 13.10, shrink 0.976, brand purity 0.757); 69% of catalogue now alone
+[exp1] MQ_4codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.339/0.339   d1:0.328/0.186*  d2:0.324/0.167*  d3:0.337/0.127*
+          cat_l2        d0:0.367/0.367   d1:0.355/0.252*  d2:0.346/0.162*  d3:0.351/0.097*
+          main_cat      d0:0.094/0.094   d1:0.100/0.081*  d2:0.090/0.072*  d3:0.100/0.001 
+          price_decile  d0:0.043/0.043   d1:0.049/0.049*  d2:0.043/0.061*  d3:0.043/-0.010 
+          rank_decile   d0:0.022/0.022   d1:0.023/0.040*  d2:0.023/0.053*  d3:0.028/-0.002 
+          cat_l3        d0:0.356/0.356   d1:0.341/0.252*  d2:0.342/0.197*  d3:0.349/0.193*
+        co-purchase preservation (same-prefix rate / chance)
+          d0:5.6x  d1:16.6x  d2:51.6x  d3:81.0x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.82(95/109)  d1:0.65(68/203)  d2:0.65(22/97)  d3:0.71(9/52)
+        digit 0:  123 cells (123 codes used),  118 multi-item (median 19 items, radius 33.70, shrink 0.731, brand purity 0.293); 0% of catalogue now alone
+        digit 1: 1031 cells (123 codes used),  479 multi-item (median 3 items, radius 24.54, shrink 0.705, brand purity 0.508); 18% of catalogue now alone
+        digit 2: 1852 cells (126 codes used),  449 multi-item (median 2 items, radius 19.73, shrink 0.824, brand purity 0.604); 45% of catalogue now alone
+        digit 3: 2312 cells (121 codes used),  356 multi-item (median 2 items, radius 16.57, shrink 0.988, brand purity 0.673); 63% of catalogue now alone
+[exp1] MQ_4codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.317/0.317   d1:0.319/0.229*  d2:0.333/0.099*  d3:0.329/0.200~*
+          cat_l2        d0:0.365/0.365   d1:0.352/0.266*  d2:0.362/0.183*  d3:0.361/0.005~ 
+          main_cat      d0:0.097/0.097   d1:0.098/0.108*  d2:0.102/0.095*  d3:0.099/0.095~ 
+          price_decile  d0:0.049/0.049   d1:0.042/0.063*  d2:0.046/0.096*  d3:0.048/-0.059~ 
+          rank_decile   d0:0.024/0.024   d1:0.026/0.035*  d2:0.021/0.032   d3:0.027/-0.018 
+          cat_l3        d0:0.352/0.352   d1:0.353/0.287*  d2:0.366/0.187*  d3:0.357/0.105~*
+        co-purchase preservation (same-prefix rate / chance)
+          d0:8.4x  d1:43.1x  d2:88.7x  d3:121.1x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.87(118/175)  d1:0.62(46/197)  d2:0.62(7/77)  d3:nan(0/30)
+        digit 0:  238 cells (238 codes used),  211 multi-item (median 8 items, radius 31.26, shrink 0.678, brand purity 0.391); 1% of catalogue now alone
+        digit 1: 1384 cells (235 codes used),  566 multi-item (median 3 items, radius 22.22, shrink 0.694, brand purity 0.567); 26% of catalogue now alone
+        digit 2: 2174 cells (246 codes used),  425 multi-item (median 2 items, radius 17.10, shrink 0.898, brand purity 0.693); 56% of catalogue now alone
+        digit 3: 2502 cells (242 codes used),  301 multi-item (median 2 items, radius 13.10, shrink 1.000, brand purity 0.774); 71% of catalogue now alone
+[exp1] MQ_4codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.308/0.308   d1:0.300/0.172*  d2:0.295/0.115~*  d3:0.299/0.088~ 
+          cat_l2        d0:0.351/0.351   d1:0.350/0.246*  d2:0.343/0.074~*  d3:0.341/-0.016~ 
+          main_cat      d0:0.090/0.090   d1:0.093/0.101*  d2:0.086/-0.046   d3:0.088/0.047~ 
+          price_decile  d0:0.045/0.045   d1:0.039/0.028*  d2:0.043/0.059   d3:0.042/0.026~ 
+          rank_decile   d0:0.030/0.030   d1:0.024/0.035*  d2:0.023/0.019   d3:0.025/0.001~ 
+          cat_l3        d0:0.377/0.377   d1:0.373/0.304*  d2:0.363/0.123~*  d3:0.356/-0.000~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:19.4x  d1:84.7x  d2:118.1x  d3:131.9x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.88(131/260)  d1:0.81(14/126)  d2:0.67(2/32)  d3:nan(0/13)
+        digit 0:  450 cells (450 codes used),  386 multi-item (median 6 items, radius 27.54, shrink 0.597, brand purity 0.455); 2% of catalogue now alone
+        digit 1: 1890 cells (452 codes used),  523 multi-item (median 2 items, radius 18.13, shrink 0.667, brand purity 0.651); 44% of catalogue now alone
+        digit 2: 2423 cells (454 codes used),  339 multi-item (median 2 items, radius 13.10, shrink 0.983, brand purity 0.758); 67% of catalogue now alone
+        digit 3: 2653 cells (461 codes used),  252 multi-item (median 2 items, radius 9.91, shrink 1.000, brand purity 0.832); 77% of catalogue now alone
+[exp1] MQ_5codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.322/0.322   d1:0.336/0.213*  d2:0.318/0.132*  d3:0.307/0.045   d4:0.329/0.062~ 
+          cat_l2        d0:0.347/0.347   d1:0.363/0.252*  d2:0.343/0.147*  d3:0.327/0.099*  d4:0.352/0.051~ 
+          main_cat      d0:0.094/0.094   d1:0.102/0.092*  d2:0.099/0.055*  d3:0.091/-0.002   d4:0.101/-0.018 
+          price_decile  d0:0.040/0.040   d1:0.052/0.050*  d2:0.044/0.011   d3:0.047/0.014   d4:0.044/0.023 
+          rank_decile   d0:0.019/0.019   d1:0.023/0.037*  d2:0.022/0.019*  d3:0.021/-0.013   d4:0.025/-0.044 
+          cat_l3        d0:0.333/0.333   d1:0.366/0.270*  d2:0.347/0.138*  d3:0.329/0.130*  d4:0.347/0.027~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:4.5x  d1:16.3x  d2:42.3x  d3:62.0x  d4:92.1x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.84(97/116)  d1:0.76(65/230)  d2:0.66(19/104)  d3:0.69(5/43)  d4:0.47(3/20)
+        digit 0:  125 cells (125 codes used),  120 multi-item (median 16 items, radius 34.88, shrink 0.757, brand purity 0.305); 0% of catalogue now alone
+        digit 1: 1003 cells (122 codes used),  467 multi-item (median 3 items, radius 25.32, shrink 0.722, brand purity 0.493); 17% of catalogue now alone
+        digit 2: 1873 cells (125 codes used),  466 multi-item (median 2 items, radius 19.77, shrink 0.823, brand purity 0.604); 45% of catalogue now alone
+        digit 3: 2301 cells (124 codes used),  336 multi-item (median 2 items, radius 16.33, shrink 1.000, brand purity 0.686); 63% of catalogue now alone
+        digit 4: 2548 cells (127 codes used),  247 multi-item (median 2 items, radius 14.14, shrink 1.000, brand purity 0.737); 74% of catalogue now alone
+[exp1] MQ_5codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.324/0.324   d1:0.334/0.197*  d2:0.325/0.052*  d3:0.308/0.054~   d4:0.318/-0.077~ 
+          cat_l2        d0:0.363/0.363   d1:0.385/0.268*  d2:0.368/0.095*  d3:0.339/0.055~   d4:0.344/0.005~ 
+          main_cat      d0:0.098/0.098   d1:0.104/0.081*  d2:0.098/0.072*  d3:0.099/0.066~   d4:0.092/-0.121~ 
+          price_decile  d0:0.045/0.045   d1:0.048/0.056*  d2:0.044/0.095*  d3:0.048/0.102~*  d4:0.042/0.096~ 
+          rank_decile   d0:0.027/0.027   d1:0.027/0.028*  d2:0.023/0.022   d3:0.024/0.021   d4:0.023/0.037~ 
+          cat_l3        d0:0.378/0.378   d1:0.394/0.299*  d2:0.371/0.126*  d3:0.339/0.130~*  d4:0.352/-0.005~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:9.5x  d1:47.6x  d2:85.7x  d3:98.8x  d4:111.1x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.86(120/189)  d1:0.77(48/173)  d2:0.60(11/74)  d3:nan(0/25)  d4:0.57(1/19)
+        digit 0:  243 cells (243 codes used),  226 multi-item (median 8 items, radius 31.75, shrink 0.689, brand purity 0.398); 1% of catalogue now alone
+        digit 1: 1463 cells (239 codes used),  525 multi-item (median 3 items, radius 21.45, shrink 0.690, brand purity 0.587); 30% of catalogue now alone
+        digit 2: 2192 cells (242 codes used),  407 multi-item (median 2 items, radius 16.27, shrink 0.853, brand purity 0.692); 57% of catalogue now alone
+        digit 3: 2469 cells (240 codes used),  296 multi-item (median 2 items, radius 12.29, shrink 1.000, brand purity 0.773); 70% of catalogue now alone
+        digit 4: 2618 cells (239 codes used),  230 multi-item (median 2 items, radius 9.61, shrink 1.000, brand purity 0.833); 77% of catalogue now alone
+[exp1] MQ_5codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.285/0.285   d1:0.291/0.181*  d2:0.295/0.011   d3:0.295/0.164~   d4:0.300/nan~ 
+          cat_l2        d0:0.326/0.326   d1:0.333/0.233*  d2:0.341/0.051   d3:0.346/-0.027~   d4:0.348/nan~ 
+          main_cat      d0:0.087/0.087   d1:0.092/0.091*  d2:0.096/0.086*  d3:0.101/0.013~   d4:0.094/0.002~ 
+          price_decile  d0:0.046/0.046   d1:0.046/0.070*  d2:0.042/0.109*  d3:0.043/0.350~   d4:0.042/0.072~ 
+          rank_decile   d0:0.023/0.023   d1:0.030/0.040*  d2:0.028/0.030   d3:0.030/-0.026~   d4:0.028/0.007~ 
+          cat_l3        d0:0.346/0.346   d1:0.351/0.253*  d2:0.352/0.102*  d3:0.361/0.000~   d4:0.361/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:12.7x  d1:58.6x  d2:122.4x  d3:137.3x  d4:145.0x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.85(113/245)  d1:0.70(14/122)  d2:0.63(1/29)  d3:nan(0/11)  d4:nan(0/6)
+        digit 0:  458 cells (458 codes used),  378 multi-item (median 5 items, radius 26.45, shrink 0.574, brand purity 0.474); 3% of catalogue now alone
+        digit 1: 1846 cells (447 codes used),  548 multi-item (median 2 items, radius 18.14, shrink 0.663, brand purity 0.654); 42% of catalogue now alone
+        digit 2: 2437 cells (465 codes used),  361 multi-item (median 2 items, radius 13.04, shrink 1.000, brand purity 0.767); 67% of catalogue now alone
+        digit 3: 2656 cells (464 codes used),  252 multi-item (median 2 items, radius 8.82, shrink 1.000, brand purity 0.850); 77% of catalogue now alone
+        digit 4: 2735 cells (465 codes used),  203 multi-item (median 2 items, radius 8.35, shrink 1.000, brand purity 0.882); 82% of catalogue now alone
+[exp1] rqkmeans_3codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.525/0.525   d1:0.138/0.142*  d2:0.129/0.195*
+          cat_l2        d0:0.609/0.609   d1:0.159/0.208*  d2:0.183/0.189*
+          main_cat      d0:0.137/0.137   d1:0.056/0.105*  d2:0.052/0.145*
+          price_decile  d0:0.059/0.059   d1:0.021/0.050*  d2:0.017/0.139*
+          rank_decile   d0:0.033/0.033   d1:0.012/0.049*  d2:0.008/0.051*
+          cat_l3        d0:0.588/0.588   d1:0.197/0.272*  d2:0.220/0.357*
+        co-purchase preservation (same-prefix rate / chance)
+          d0:23.4x  d1:73.7x  d2:128.6x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.96(104/120)  d1:0.78(57/295)  d2:0.86(2/56)
+        digit 0:  128 cells (128 codes used),  123 multi-item (median 22 items, radius 30.12, shrink 0.653, brand purity 0.344); 0% of catalogue now alone
+        digit 1: 1083 cells (128 codes used),  636 multi-item (median 3 items, radius 22.17, shrink 0.712, brand purity 0.559); 14% of catalogue now alone
+        digit 2: 2195 cells (128 codes used),  481 multi-item (median 2 items, radius 12.82, shrink 0.687, brand purity 0.760); 55% of catalogue now alone
+[exp1] rqkmeans_3codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.472/0.472   d1:0.097/0.151*  d2:0.108/0.689~*
+          cat_l2        d0:0.561/0.561   d1:0.131/0.201*  d2:0.144/0.509~*
+          main_cat      d0:0.128/0.128   d1:0.041/0.094*  d2:0.038/0.103~ 
+          price_decile  d0:0.058/0.058   d1:0.016/0.073*  d2:0.023/-0.003~ 
+          rank_decile   d0:0.035/0.035   d1:0.007/0.049*  d2:0.014/0.049 
+          cat_l3        d0:0.573/0.573   d1:0.156/0.231*  d2:0.172/1.000~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:33.7x  d1:114.3x  d2:153.8x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.98(166/213)  d1:0.78(11/126)  d2:0.47(1/18)
+        digit 0:  256 cells (256 codes used),  240 multi-item (median 12 items, radius 27.71, shrink 0.601, brand purity 0.410); 1% of catalogue now alone
+        digit 1: 1845 cells (256 codes used),  656 multi-item (median 2 items, radius 16.03, shrink 0.586, brand purity 0.696); 38% of catalogue now alone
+        digit 2: 2510 cells (256 codes used),  367 multi-item (median 2 items, radius 8.61, shrink 1.000, brand purity 0.870); 69% of catalogue now alone
+[exp1] rqkmeans_3codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.411/0.411   d1:0.086/0.115*  d2:0.059/nan~ 
+          cat_l2        d0:0.504/0.504   d1:0.122/0.169*  d2:0.082/nan~ 
+          main_cat      d0:0.122/0.122   d1:0.026/0.093*  d2:0.016/nan~ 
+          price_decile  d0:0.056/0.056   d1:0.018/0.055*  d2:0.016/0.280~*
+          rank_decile   d0:0.036/0.036   d1:0.006/0.050*  d2:0.008/-0.045~ 
+          cat_l3        d0:0.528/0.528   d1:0.147/0.208*  d2:0.104/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:51.6x  d1:145.6x  d2:170.8x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.99(156/321)  d1:0.97(2/33)  d2:0.42(1/12)
+        digit 0:  512 cells (512 codes used),  441 multi-item (median 6 items, radius 24.29, shrink 0.527, brand purity 0.519); 2% of catalogue now alone
+        digit 1: 2455 cells (512 codes used),  429 multi-item (median 2 items, radius 9.48, shrink 0.433, brand purity 0.844); 65% of catalogue now alone
+        digit 2: 2808 cells (512 codes used),  201 multi-item (median 2 items, radius 5.16, shrink 1.000, brand purity 0.934); 84% of catalogue now alone
+[exp1] rqkmeans_4codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.525/0.525   d1:0.138/0.142*  d2:0.129/0.195*  d3:0.095/0.244~ 
+          cat_l2        d0:0.609/0.609   d1:0.159/0.208*  d2:0.183/0.189*  d3:0.149/0.347~*
+          main_cat      d0:0.137/0.137   d1:0.056/0.105*  d2:0.052/0.145*  d3:0.033/-0.129~ 
+          price_decile  d0:0.059/0.059   d1:0.021/0.050*  d2:0.017/0.139*  d3:0.013/0.115~ 
+          rank_decile   d0:0.033/0.033   d1:0.012/0.049*  d2:0.008/0.051*  d3:0.012/0.101~ 
+          cat_l3        d0:0.588/0.588   d1:0.197/0.272*  d2:0.220/0.357*  d3:0.180/-0.105~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:23.4x  d1:73.7x  d2:128.6x  d3:153.6x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.96(104/120)  d1:0.78(57/295)  d2:0.86(2/56)  d3:nan(0/15)
+        digit 0:  128 cells (128 codes used),  123 multi-item (median 22 items, radius 30.12, shrink 0.653, brand purity 0.344); 0% of catalogue now alone
+        digit 1: 1083 cells (128 codes used),  636 multi-item (median 3 items, radius 22.17, shrink 0.712, brand purity 0.559); 14% of catalogue now alone
+        digit 2: 2195 cells (128 codes used),  481 multi-item (median 2 items, radius 12.82, shrink 0.687, brand purity 0.760); 55% of catalogue now alone
+        digit 3: 2526 cells (128 codes used),  331 multi-item (median 2 items, radius 8.55, shrink 1.000, brand purity 0.867); 71% of catalogue now alone
+[exp1] rqkmeans_4codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.472/0.472   d1:0.097/0.151*  d2:0.108/0.689~*  d3:0.067/nan~ 
+          cat_l2        d0:0.561/0.561   d1:0.131/0.201*  d2:0.144/0.509~*  d3:0.100/nan~ 
+          main_cat      d0:0.128/0.128   d1:0.041/0.094*  d2:0.038/0.103~   d3:0.022/-0.018~ 
+          price_decile  d0:0.058/0.058   d1:0.016/0.073*  d2:0.023/-0.003~   d3:0.013/0.049~ 
+          rank_decile   d0:0.035/0.035   d1:0.007/0.049*  d2:0.014/0.049   d3:0.006/0.068~ 
+          cat_l3        d0:0.573/0.573   d1:0.156/0.231*  d2:0.172/1.000~   d3:0.124/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:33.7x  d1:114.3x  d2:153.8x  d3:144.8x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.98(166/213)  d1:0.78(11/126)  d2:0.47(1/18)  d3:nan(0/5)
+        digit 0:  256 cells (256 codes used),  240 multi-item (median 12 items, radius 27.71, shrink 0.601, brand purity 0.410); 1% of catalogue now alone
+        digit 1: 1845 cells (256 codes used),  656 multi-item (median 2 items, radius 16.03, shrink 0.586, brand purity 0.696); 38% of catalogue now alone
+        digit 2: 2510 cells (256 codes used),  367 multi-item (median 2 items, radius 8.61, shrink 1.000, brand purity 0.870); 69% of catalogue now alone
+        digit 3: 2728 cells (256 codes used),  252 multi-item (median 2 items, radius 6.29, shrink 1.000, brand purity 0.924); 80% of catalogue now alone
+[exp1] rqkmeans_4codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.411/0.411   d1:0.086/0.115*  d2:0.059/nan~   d3:0.039/nan~ 
+          cat_l2        d0:0.504/0.504   d1:0.122/0.169*  d2:0.082/nan~   d3:0.056/nan~ 
+          main_cat      d0:0.122/0.122   d1:0.026/0.093*  d2:0.016/nan~   d3:0.011/nan~ 
+          price_decile  d0:0.056/0.056   d1:0.018/0.055*  d2:0.016/0.280~*  d3:0.008/nan~ 
+          rank_decile   d0:0.036/0.036   d1:0.006/0.050*  d2:0.008/-0.045~   d3:0.006/0.405~ 
+          cat_l3        d0:0.528/0.528   d1:0.147/0.208*  d2:0.104/nan~   d3:0.071/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:51.6x  d1:145.6x  d2:170.8x  d3:161.4x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.99(156/321)  d1:0.97(2/33)  d2:0.42(1/12)  d3:nan(0/2)
+        digit 0:  512 cells (512 codes used),  441 multi-item (median 6 items, radius 24.29, shrink 0.527, brand purity 0.519); 2% of catalogue now alone
+        digit 1: 2455 cells (512 codes used),  429 multi-item (median 2 items, radius 9.48, shrink 0.433, brand purity 0.844); 65% of catalogue now alone
+        digit 2: 2808 cells (512 codes used),  201 multi-item (median 2 items, radius 5.16, shrink 1.000, brand purity 0.934); 84% of catalogue now alone
+        digit 3: 2932 cells (512 codes used),  127 multi-item (median 2 items, radius 3.64, shrink 1.000, brand purity 0.959); 90% of catalogue now alone
+[exp1] rqkmeans_5codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.525/0.525   d1:0.138/0.142*  d2:0.129/0.195*  d3:0.095/0.244~   d4:0.062/nan~ 
+          cat_l2        d0:0.609/0.609   d1:0.159/0.208*  d2:0.183/0.189*  d3:0.149/0.347~*  d4:0.099/nan~ 
+          main_cat      d0:0.137/0.137   d1:0.056/0.105*  d2:0.052/0.145*  d3:0.033/-0.129~   d4:0.019/-0.119~ 
+          price_decile  d0:0.059/0.059   d1:0.021/0.050*  d2:0.017/0.139*  d3:0.013/0.115~   d4:0.013/0.246~ 
+          rank_decile   d0:0.033/0.033   d1:0.012/0.049*  d2:0.008/0.051*  d3:0.012/0.101~   d4:0.005/-0.033~ 
+          cat_l3        d0:0.588/0.588   d1:0.197/0.272*  d2:0.220/0.357*  d3:0.180/-0.105~   d4:0.129/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:23.4x  d1:73.7x  d2:128.6x  d3:153.6x  d4:166.2x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.96(104/120)  d1:0.78(57/295)  d2:0.86(2/56)  d3:nan(0/15)  d4:nan(0/11)
+        digit 0:  128 cells (128 codes used),  123 multi-item (median 22 items, radius 30.12, shrink 0.653, brand purity 0.344); 0% of catalogue now alone
+        digit 1: 1083 cells (128 codes used),  636 multi-item (median 3 items, radius 22.17, shrink 0.712, brand purity 0.559); 14% of catalogue now alone
+        digit 2: 2195 cells (128 codes used),  481 multi-item (median 2 items, radius 12.82, shrink 0.687, brand purity 0.760); 55% of catalogue now alone
+        digit 3: 2526 cells (128 codes used),  331 multi-item (median 2 items, radius 8.55, shrink 1.000, brand purity 0.867); 71% of catalogue now alone
+        digit 4: 2678 cells (128 codes used),  249 multi-item (median 2 items, radius 6.79, shrink 1.000, brand purity 0.916); 78% of catalogue now alone
+[exp1] rqkmeans_5codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.472/0.472   d1:0.097/0.151*  d2:0.108/0.689~*  d3:0.067/nan~   d4:0.052/nan~ 
+          cat_l2        d0:0.561/0.561   d1:0.131/0.201*  d2:0.144/0.509~*  d3:0.100/nan~   d4:0.083/nan~ 
+          main_cat      d0:0.128/0.128   d1:0.041/0.094*  d2:0.038/0.103~   d3:0.022/-0.018~   d4:0.017/nan~ 
+          price_decile  d0:0.058/0.058   d1:0.016/0.073*  d2:0.023/-0.003~   d3:0.013/0.049~   d4:0.011/0.162~ 
+          rank_decile   d0:0.035/0.035   d1:0.007/0.049*  d2:0.014/0.049   d3:0.006/0.068~   d4:0.004/-0.088~ 
+          cat_l3        d0:0.573/0.573   d1:0.156/0.231*  d2:0.172/1.000~   d3:0.124/nan~   d4:0.111/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:33.7x  d1:114.3x  d2:153.8x  d3:144.8x  d4:136.1x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.98(166/213)  d1:0.78(11/126)  d2:0.47(1/18)  d3:nan(0/5)  d4:nan(0/3)
+        digit 0:  256 cells (256 codes used),  240 multi-item (median 12 items, radius 27.71, shrink 0.601, brand purity 0.410); 1% of catalogue now alone
+        digit 1: 1845 cells (256 codes used),  656 multi-item (median 2 items, radius 16.03, shrink 0.586, brand purity 0.696); 38% of catalogue now alone
+        digit 2: 2510 cells (256 codes used),  367 multi-item (median 2 items, radius 8.61, shrink 1.000, brand purity 0.870); 69% of catalogue now alone
+        digit 3: 2728 cells (256 codes used),  252 multi-item (median 2 items, radius 6.29, shrink 1.000, brand purity 0.924); 80% of catalogue now alone
+        digit 4: 2832 cells (256 codes used),  179 multi-item (median 2 items, radius 4.76, shrink 1.000, brand purity 0.932); 85% of catalogue now alone
+[exp1] rqkmeans_5codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.344/0.344   d1:0.086/0.190~*  d2:0.054/nan~   d3:0.046/nan~   d4:0.043/nan~ 
+          cat_l2        d0:0.392/0.392   d1:0.079/0.216~*  d2:0.049/nan~   d3:0.035/nan~   d4:0.038/nan~ 
+          main_cat      d0:0.103/0.103   d1:0.018/0.073~*  d2:0.013/nan~   d3:0.008/nan~   d4:0.007/nan~ 
+          price_decile  d0:0.040/0.040   d1:0.012/0.057~   d2:0.013/nan~   d3:0.007/nan~   d4:0.003/nan~ 
+          rank_decile   d0:0.025/0.025   d1:0.008/0.056~*  d2:0.002/nan~   d3:-0.001/nan~   d4:0.002/nan~ 
+          cat_l3        d0:0.410/0.410   d1:0.075/0.194~*  d2:0.047/nan~   d3:0.033/nan~   d4:0.035/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:36.7x  d1:88.6x  d2:140.0x  d3:165.6x  d4:142.6x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.76(1/503)  d1:nan(0/11)
+        digit 0:  512 cells (512 codes used),  512 multi-item (median 6 items, radius 28.27, shrink 0.613, brand purity 0.414); 0% of catalogue now alone
+        digit 1: 2901 cells (512 codes used),  159 multi-item (median 2 items, radius 14.46, shrink 0.490, brand purity 0.736); 88% of catalogue now alone
+        digit 2: 3065 cells (512 codes used),   33 multi-item (median 2 items, radius 8.77, shrink 1.000, brand purity 0.851); 98% of catalogue now alone
+        digit 3: 3086 cells (512 codes used),   17 multi-item (median 2 items, radius 5.57, shrink 1.000, brand purity 0.912); 99% of catalogue now alone
+        digit 4: 3094 cells (512 codes used),    9 multi-item (median 2 items, radius 3.27, shrink 1.000, brand purity 0.944); 99% of catalogue now alone
+[exp1] rqvae_3codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.454/0.454   d1:0.205/0.166*  d2:0.072/0.068~ 
+          cat_l2        d0:0.510/0.510   d1:0.209/0.238*  d2:0.053/0.018~ 
+          main_cat      d0:0.118/0.118   d1:0.041/0.085*  d2:0.015/0.028 
+          price_decile  d0:0.051/0.051   d1:0.023/0.067*  d2:0.001/0.007 
+          rank_decile   d0:0.028/0.028   d1:0.014/0.043*  d2:0.002/-0.004 
+          cat_l3        d0:0.512/0.512   d1:0.215/0.287*  d2:0.043/0.008~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:19.8x  d1:83.0x  d2:6.9x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.82(102/104)  d1:0.59(20/137)  d2:0.58(1/1)
+        digit 0:  104 cells (104 codes used),  104 multi-item (median 27 items, radius 36.47, shrink 0.791, brand purity 0.223); 0% of catalogue now alone
+        digit 1: 1716 cells (128 codes used),  706 multi-item (median 2 items, radius 18.74, shrink 0.550, brand purity 0.644); 33% of catalogue now alone
+        digit 2: 3069 cells (128 codes used),   12 multi-item (median 2 items, radius 0.00, shrink 0.000, brand purity 0.840); 98% of catalogue now alone
+[exp1] rqvae_3codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.474/0.474   d1:0.207/0.177*  d2:0.059/0.096~*
+          cat_l2        d0:0.514/0.514   d1:0.239/0.263*  d2:0.047/0.050~ 
+          main_cat      d0:0.120/0.120   d1:0.054/0.075*  d2:0.015/0.016 
+          price_decile  d0:0.047/0.047   d1:0.025/0.054*  d2:0.004/0.000 
+          rank_decile   d0:0.027/0.027   d1:0.014/0.034*  d2:0.000/-0.005 
+          cat_l3        d0:0.486/0.486   d1:0.251/0.316*  d2:0.037/0.039*
+        co-purchase preservation (same-prefix rate / chance)
+          d0:15.5x  d1:68.9x  d2:23.5x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.86(69/71)  d1:0.73(31/208)  d2:0.50(1/1)
+        digit 0:   71 cells ( 71 codes used),   71 multi-item (median 38 items, radius 36.90, shrink 0.800, brand purity 0.217); 0% of catalogue now alone
+        digit 1: 1424 cells (255 codes used),  678 multi-item (median 3 items, radius 22.20, shrink 0.621, brand purity 0.560); 24% of catalogue now alone
+        digit 2: 3072 cells (250 codes used),   25 multi-item (median 2 items, radius 1.26, shrink 0.460, brand purity 0.828); 98% of catalogue now alone
+[exp1] rqvae_3codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.498/0.498   d1:0.201/0.148*  d2:0.058/nan~ 
+          cat_l2        d0:0.526/0.526   d1:0.229/0.253*  d2:0.045/nan~ 
+          main_cat      d0:0.128/0.128   d1:0.055/0.082*  d2:0.012/-0.000~ 
+          price_decile  d0:0.041/0.041   d1:0.032/0.056*  d2:0.007/-0.000~ 
+          rank_decile   d0:0.021/0.021   d1:0.028/0.047*  d2:0.004/-0.004 
+          cat_l3        d0:0.500/0.500   d1:0.262/0.318*  d2:0.046/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:11.3x  d1:119.9x  d2:77.3x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.78(33/33)  d1:0.91(15/123)
+        digit 0:   33 cells ( 33 codes used),   33 multi-item (median 90 items, radius 39.19, shrink 0.850, brand purity 0.152); 0% of catalogue now alone
+        digit 1: 1788 cells (509 codes used),  690 multi-item (median 2 items, radius 16.55, shrink 0.443, brand purity 0.695); 35% of catalogue now alone
+        digit 2: 3093 cells (505 codes used),   12 multi-item (median 2 items, radius 0.00, shrink 0.000, brand purity 0.917); 99% of catalogue now alone
+[exp1] rqvae_4codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.498/0.498   d1:0.172/0.172*  d2:0.081/-0.029~   d3:0.049/nan~ 
+          cat_l2        d0:0.545/0.545   d1:0.199/0.256*  d2:0.100/0.207*  d3:0.049/nan~ 
+          main_cat      d0:0.127/0.127   d1:0.047/0.090*  d2:0.020/0.191*  d3:0.012/nan~ 
+          price_decile  d0:0.048/0.048   d1:0.027/0.056*  d2:0.013/0.082*  d3:0.005/-0.000~ 
+          rank_decile   d0:0.023/0.023   d1:0.015/0.042*  d2:0.006/0.107*  d3:-0.002/-0.006~ 
+          cat_l3        d0:0.535/0.535   d1:0.217/0.298*  d2:0.112/0.458~*  d3:0.041/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:13.2x  d1:87.3x  d2:152.8x  d3:96.6x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.79(38/39)  d1:0.77(28/185)  d2:0.92(6/22)
+        digit 0:   39 cells ( 39 codes used),   39 multi-item (median 71 items, radius 39.17, shrink 0.850, brand purity 0.147); 0% of catalogue now alone
+        digit 1: 1516 cells (128 codes used),  699 multi-item (median 2 items, radius 20.05, shrink 0.556, brand purity 0.632); 26% of catalogue now alone
+        digit 2: 2712 cells (128 codes used),  239 multi-item (median 2 items, radius 6.65, shrink 0.449, brand purity 0.912); 80% of catalogue now alone
+        digit 3: 3093 cells (128 codes used),   12 multi-item (median 2 items, radius 0.00, shrink 0.237, brand purity 0.917); 99% of catalogue now alone
+[exp1] rqvae_4codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.450/0.450   d1:0.291/0.263*  d2:0.134/0.147*  d3:0.067/nan~ 
+          cat_l2        d0:0.427/0.427   d1:0.349/0.400*  d2:0.145/0.169*  d3:0.056/nan~ 
+          main_cat      d0:0.105/0.105   d1:0.085/0.108*  d2:0.032/0.090*  d3:0.020/nan~ 
+          price_decile  d0:0.037/0.037   d1:0.042/0.055*  d2:0.021/0.025   d3:0.009/-0.000~ 
+          rank_decile   d0:0.017/0.017   d1:0.025/0.038*  d2:0.009/0.052*  d3:0.004/0.000~ 
+          cat_l3        d0:0.408/0.408   d1:0.371/0.431*  d2:0.148/0.204*  d3:0.047/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:5.5x  d1:64.5x  d2:160.7x  d3:84.3x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.72(10/10)  d1:0.90(99/328)  d2:0.89(3/20)
+        digit 0:   10 cells ( 10 codes used),   10 multi-item (median 322 items, radius 41.47, shrink 0.899, brand purity 0.106); 0% of catalogue now alone
+        digit 1:  820 cells (255 codes used),  587 multi-item (median 4 items, radius 25.09, shrink 0.613, brand purity 0.503); 8% of catalogue now alone
+        digit 2: 2631 cells (255 codes used),  318 multi-item (median 2 items, radius 8.03, shrink 0.374, brand purity 0.873); 74% of catalogue now alone
+        digit 3: 3094 cells (254 codes used),   11 multi-item (median 2 items, radius 0.00, shrink nan, brand purity 0.909); 99% of catalogue now alone
+[exp1] rqvae_4codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.474/0.474   d1:0.261/0.214*  d2:0.121/0.243~*  d3:0.063/nan~ 
+          cat_l2        d0:0.528/0.528   d1:0.307/0.327*  d2:0.131/0.217*  d3:0.051/nan~ 
+          main_cat      d0:0.116/0.116   d1:0.073/0.111*  d2:0.020/0.121*  d3:0.007/nan~ 
+          price_decile  d0:0.044/0.044   d1:0.045/0.068*  d2:0.018/0.134*  d3:0.007/0.000~ 
+          rank_decile   d0:0.020/0.020   d1:0.030/0.051*  d2:0.010/0.015   d3:0.005/0.000~ 
+          cat_l3        d0:0.500/0.500   d1:0.345/0.408*  d2:0.142/0.264~*  d3:0.047/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:12.8x  d1:102.2x  d2:145.7x  d3:84.3x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.81(40/40)  d1:0.85(33/219)  d2:0.82(2/18)
+        digit 0:   40 cells ( 40 codes used),   40 multi-item (median 73 items, radius 39.78, shrink 0.863, brand purity 0.158); 0% of catalogue now alone
+        digit 1: 1443 cells (503 codes used),  690 multi-item (median 3 items, radius 18.26, shrink 0.487, brand purity 0.642); 24% of catalogue now alone
+        digit 2: 2738 cells (471 codes used),  243 multi-item (median 2 items, radius 6.38, shrink 0.533, brand purity 0.916); 80% of catalogue now alone
+        digit 3: 3094 cells (460 codes used),   11 multi-item (median 2 items, radius 0.00, shrink 0.000, brand purity 0.909); 99% of catalogue now alone
+[exp1] rqvae_5codebook_128
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.400/0.400   d1:0.272/0.294*  d2:0.111/0.186*  d3:0.077/1.000~*  d4:0.034/nan~ 
+          cat_l2        d0:0.418/0.418   d1:0.319/0.399*  d2:0.133/0.219*  d3:0.092/1.000~*  d4:0.034/nan~ 
+          main_cat      d0:0.100/0.100   d1:0.061/0.106*  d2:0.026/0.112*  d3:0.018/-0.143~   d4:0.009/nan~ 
+          price_decile  d0:0.027/0.027   d1:0.038/0.060*  d2:0.016/0.088*  d3:0.010/0.070~   d4:-0.004/-0.000~ 
+          rank_decile   d0:0.017/0.017   d1:0.024/0.044*  d2:0.014/0.050*  d3:0.009/0.161~*  d4:-0.000/-0.000~ 
+          cat_l3        d0:0.396/0.396   d1:0.334/0.432*  d2:0.136/0.249*  d3:0.095/1.000~*  d4:0.029/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:5.0x  d1:55.9x  d2:149.0x  d3:150.1x  d4:84.3x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.72(14/14)  d1:0.88(97/310)  d2:0.96(8/38)  d3:nan(0/10)
+        digit 0:   14 cells ( 14 codes used),   14 multi-item (median 200 items, radius 41.11, shrink 0.892, brand purity 0.114); 0% of catalogue now alone
+        digit 1:  799 cells (128 codes used),  563 multi-item (median 4 items, radius 26.71, shrink 0.647, brand purity 0.485); 8% of catalogue now alone
+        digit 2: 2544 cells (128 codes used),  337 multi-item (median 2 items, radius 8.27, shrink 0.361, brand purity 0.870); 71% of catalogue now alone
+        digit 3: 2796 cells (128 codes used),  197 multi-item (median 2 items, radius 5.41, shrink 1.000, brand purity 0.957); 84% of catalogue now alone
+        digit 4: 3094 cells (128 codes used),   11 multi-item (median 2 items, radius 0.00, shrink 0.000, brand purity 0.909); 99% of catalogue now alone
+[exp1] rqvae_5codebook_256
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.487/0.487   d1:0.215/0.180*  d2:0.104/0.146*  d3:0.067/nan~   d4:0.041/nan~ 
+          cat_l2        d0:0.528/0.528   d1:0.248/0.306*  d2:0.113/0.116*  d3:0.082/nan~   d4:0.039/nan~ 
+          main_cat      d0:0.125/0.125   d1:0.053/0.105*  d2:0.024/0.053*  d3:0.019/nan~   d4:0.011/nan~ 
+          price_decile  d0:0.053/0.053   d1:0.027/0.065*  d2:0.016/0.083*  d3:0.012/0.144~   d4:0.004/0.000~ 
+          rank_decile   d0:0.021/0.021   d1:0.018/0.043*  d2:0.010/0.090*  d3:0.013/0.150~*  d4:0.004/-0.021~ 
+          cat_l3        d0:0.506/0.506   d1:0.277/0.368*  d2:0.126/0.167*  d3:0.093/nan~   d4:0.044/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:15.2x  d1:90.5x  d2:137.4x  d3:128.1x  d4:78.1x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.82(51/51)  d1:0.90(32/206)  d2:0.91(4/24)  d3:nan(0/4)  d4:nan(0/1)
+        digit 0:   51 cells ( 51 codes used),   51 multi-item (median 57 items, radius 38.09, shrink 0.826, brand purity 0.196); 0% of catalogue now alone
+        digit 1: 1536 cells (254 codes used),  629 multi-item (median 3 items, radius 19.38, shrink 0.534, brand purity 0.626); 29% of catalogue now alone
+        digit 2: 2686 cells (249 codes used),  252 multi-item (median 2 items, radius 8.02, shrink 0.628, brand purity 0.871); 78% of catalogue now alone
+        digit 3: 2910 cells (250 codes used),  111 multi-item (median 2 items, radius 5.32, shrink 1.000, brand purity 0.926); 90% of catalogue now alone
+        digit 4: 3074 cells (250 codes used),   14 multi-item (median 2 items, radius 0.00, shrink 0.822, brand purity 0.929); 99% of catalogue now alone
+[exp1] rqvae_5codebook_512
+        attribute alignment (AMI; cond = given digits 1..d-1)
+          cat_l1        d0:0.430/0.430   d1:0.332/0.315*  d2:0.147/0.159*  d3:0.104/nan~   d4:0.050/nan~ 
+          cat_l2        d0:0.439/0.439   d1:0.406/0.460*  d2:0.161/0.186*  d3:0.110/nan~   d4:0.041/nan~ 
+          main_cat      d0:0.102/0.102   d1:0.095/0.125*  d2:0.049/0.104*  d3:0.030/nan~   d4:0.009/nan~ 
+          price_decile  d0:0.039/0.039   d1:0.042/0.060*  d2:0.026/0.077*  d3:0.021/0.052~   d4:0.004/-0.000~ 
+          rank_decile   d0:0.022/0.022   d1:0.027/0.038*  d2:0.013/0.063*  d3:0.012/-0.051~   d4:-0.000/-0.000~ 
+          cat_l3        d0:0.404/0.404   d1:0.429/0.500*  d2:0.185/0.239*  d3:0.121/nan~   d4:0.041/nan~ 
+        co-purchase preservation (same-prefix rate / chance)
+          d0:6.1x  d1:65.3x  d2:154.8x  d3:139.0x  d4:84.3x
+        code readability (held-out AUC of the cell's own terms)
+          d0:0.78(12/12)  d1:0.92(118/302)  d2:0.86(6/34)  d3:nan(0/7)
+        digit 0:   12 cells ( 12 codes used),   12 multi-item (median 238 items, radius 41.37, shrink 0.897, brand purity 0.102); 0% of catalogue now alone
+        digit 1:  746 cells (250 codes used),  527 multi-item (median 4 items, radius 24.67, shrink 0.596, brand purity 0.517); 7% of catalogue now alone
+        digit 2: 2473 cells (478 codes used),  395 multi-item (median 2 items, radius 9.10, shrink 0.444, brand purity 0.870); 67% of catalogue now alone
+        digit 3: 2841 cells (440 codes used),  162 multi-item (median 2 items, radius 5.41, shrink 1.000, brand purity 0.937); 86% of catalogue now alone
+        digit 4: 3094 cells (479 codes used),   11 multi-item (median 2 items, radius 0.00, shrink 0.000, brand purity 0.909); 99% of catalogue now alone
+[exp1] wrote /l/users/leo.rodrigues/sidlens/derived/exp1_atlas
+[exp1] done 2026-09-05T06:09:28+04:00

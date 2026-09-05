@@ -1,7 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=sidlens-exp2
-#SBATCH --partition=cscc-cpu-p
-#SBATCH --account=cscc-users
+#SBATCH --partition=ws-ia
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -19,7 +18,7 @@
 # SLURM copies the batch script into its spool directory, so BASH_SOURCE points
 # there, not at the repo. The repo path has to be absolute (overridable for a
 # relocated checkout).
-SIDLENS_REPO="${SIDLENS_REPO:-/home/leo.rodrigues/onediffrec/sidlens}"
+SIDLENS_REPO="${SIDLENS_REPO:-/home/leo.rodrigues/GenRecSys/sidlens/sidlens}"
 if ! source "${SIDLENS_REPO}/scripts/_preamble.sh"; then
     echo "FATAL: cannot source ${SIDLENS_REPO}/scripts/_preamble.sh" >&2
     exit 1
