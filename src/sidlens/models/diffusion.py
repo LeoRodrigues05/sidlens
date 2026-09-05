@@ -22,6 +22,7 @@ pipeline, no cache directory, no sentence encoder.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -161,3 +162,79 @@ def load(entry: dict, device: str = "cpu", strict: bool = True):
     model.load_state_dict(sd, strict=True)
     model.to(device).eval()
     return model, report
+
+
+def load_by_id(ckpt_id: str, device: str = "cpu", strict: bool = True):
+    """Load by registry id instead of by entry dict.
+
+    `load` takes the entry because that is what carries the config; every call
+    site was otherwise re-reading and re-indexing the registry JSON, and one of
+    them passed the id straight through and got a confusing TypeError.
+    """
+    reg = json.loads((paths.MANIFESTS / "registry.diffusion.json").read_text())
+    if ckpt_id not in reg:
+        raise KeyError(f"unknown diffusion checkpoint {ckpt_id!r}; "
+                       f"{len(reg)} known, e.g. {sorted(reg)[:3]}")
+    return load(reg[ckpt_id], device=device, strict=strict)
+
+
+# --------------------------------------------------------------------------
+# Runtime: the two-stage path, and per-digit logits in CODE order.
+#
+# `DIFF_GRM.forward(batch, return_loss=False)` returns after the ENCODER -- it
+# is an inference short-circuit, not a full forward. Anything hooking the
+# decoder blocks through that call captures nothing and looks like it worked.
+# The decoder is reached only via `forward_decoder_only`, so the two stages are
+# exposed separately here and every interp path goes through them.
+#
+# Token layout differs from the AR side and the difference is silent:
+#
+#     DiffGRM   id = sid_offset + digit * K + code      contiguous, CODE order
+#     AR        id read from added_tokens.json          STRING-SORT order
+#
+# So `digit_logits` below and `ar.digit_logits` both return code-ordered
+# columns, and no cross-paradigm comparison should index either model's
+# vocabulary directly.
+# --------------------------------------------------------------------------
+
+def sid_token_id(digit: int, code: int, n_codebook: int, codebook_size: int,
+                 sid_offset: int = 3) -> int:
+    """Token id for one (digit, code) under the DiffGRM layout."""
+    if not 0 <= digit < n_codebook:
+        raise ValueError(f"digit {digit} outside [0,{n_codebook})")
+    if not 0 <= code < codebook_size:
+        raise ValueError(f"code {code} outside [0,{codebook_size})")
+    return sid_offset + digit * codebook_size + code
+
+
+def encode(model, history_sid, history_mask=None):
+    """Run the encoder only. `history_sid` is [B, S, n_digit] of codebook ids.
+
+    PAD is -1, matching the vendor's own assertion. Passing offset token ids
+    here instead of raw codes trips that assertion, which is the intended
+    behaviour -- the two id spaces must not be mixed.
+    """
+    batch = {"history_sid": history_sid}
+    if history_mask is not None:
+        batch["history_mask"] = history_mask
+    with torch.no_grad():
+        return model(batch, return_loss=False).hidden_states
+
+
+def digit_logits(model, encoder_hidden, decoder_input_ids, mask_positions=None):
+    """[B, n_digit, K] logits, column k being codeword k.
+
+    `decoder_input_ids` holds revealed codes (0 where masked) and
+    `mask_positions` marks which digits are still to be predicted -- the same
+    convention the vendor's guided path uses, so a capture taken here sits on
+    the model's real decoding trajectory rather than a reconstruction of it.
+    """
+    if mask_positions is None:
+        mask_positions = torch.ones_like(decoder_input_ids, dtype=torch.float)
+    with torch.no_grad():
+        out = model.forward_decoder_only(
+            {"decoder_input_ids": decoder_input_ids,
+             "encoder_hidden": encoder_hidden,
+             "mask_positions": mask_positions},
+            return_loss=False, digit=None, use_cache=False)
+    return out.logits

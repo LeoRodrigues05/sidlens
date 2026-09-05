@@ -13,7 +13,7 @@ import pytest
 
 from sidlens import paths
 from sidlens.data.sids import (SID_OFFSET, SidTable, SidVariant, available,
-                               load_item2id)
+                               check_nesting, is_nested_family, load_item2id)
 
 CATEGORY = "Industrial_and_Scientific"
 N_ITEMS = 3105
@@ -160,3 +160,46 @@ def test_mq_is_not_nested_but_residual_quantizers_are():
 
     assert level0_agreement("rqkmeans") == N_ITEMS, "RQ-KMeans must be nested"
     assert level0_agreement("MQ") < N_ITEMS * 0.05, "MQ must not be nested"
+
+
+# --- depth-family nesting ----------------------------------------------------
+
+def test_rqkmeans_depth_variants_are_one_fit_truncated():
+    """3cb must be a byte-exact prefix of 5cb, or 'add a digit' is not a clean
+    manipulation and RQ3's redundancy question cannot be asked within a family."""
+    for size in (128, 256):
+        a = SidTable.load(f"rqkmeans_3codebook_{size}")
+        e = SidTable.load(f"rqkmeans_5codebook_{size}")
+        rep = check_nesting(a, e)
+        assert rep["nested"], rep
+
+
+def test_rqvae_and_mq_depth_variants_are_independent_fits():
+    """They share nothing, so a 3cb-vs-4cb comparison changes the quantizer as
+    well as the depth. Pinned so nobody reads such a comparison as pure scaling."""
+    for q in ("rqvae", "MQ"):
+        rep = check_nesting(SidTable.load(f"{q}_3codebook_128"),
+                            SidTable.load(f"{q}_4codebook_128"))
+        assert not rep["nested"]
+        assert rep["agree_rate"] < 0.05, rep
+        assert not is_nested_family(f"{q}_3codebook_128")
+
+
+def test_rqkmeans_5cb_512_is_a_separate_lineage():
+    """The mispacking exception. Its siblings agree 3105/3105; it agrees on ~0,
+    which is the signature of a different fit rather than a deeper one."""
+    a = SidTable.load("rqkmeans_3codebook_512")
+    assert check_nesting(a, SidTable.load("rqkmeans_4codebook_512"))["nested"]
+    odd = check_nesting(a, SidTable.load("rqkmeans_5codebook_512"))
+    assert not odd["nested"]
+    assert odd["agree_rate"] < 0.01, odd
+    assert not is_nested_family("rqkmeans_5codebook_512")
+    assert is_nested_family("rqkmeans_3codebook_512")
+
+
+def test_check_nesting_refuses_incomparable_pairs():
+    a = SidTable.load("rqkmeans_3codebook_128")
+    with pytest.raises(ValueError, match="one codebook size"):
+        check_nesting(a, SidTable.load("rqkmeans_4codebook_256"))
+    with pytest.raises(ValueError, match="fewer digits"):
+        check_nesting(SidTable.load("rqkmeans_4codebook_128"), a)

@@ -217,3 +217,64 @@ def load_item2id(category: str) -> dict[str, int]:
         asin, idx = line.split("\t")
         out[asin] = int(idx)
     return out
+
+
+# --- depth families: which variants are truncations of one fit ---------------
+#
+# Measured across all 27 tables, not assumed. For RQ-KMeans, the 3/4/5-codebook
+# tables at one codebook size are the SAME fit truncated to different depths --
+# every item's 3-digit SID is a prefix of its 5-digit SID (3105/3105). For
+# RQ-VAE and MQ they are independent fits: agreement is 0/3105 everywhere, so a
+# 3cb and a 4cb table share no structure at all.
+#
+# This decides what a depth comparison can claim. Within a nested family,
+# "add a digit" is a clean manipulation and RQ3's redundancy question is
+# answerable directly. Across independent fits, 3cb vs 4cb differs by BOTH the
+# extra digit and a whole refit, and any difference confounds the two.
+#
+# One exception, and it is not a rounding error: rqkmeans 5cb x 512 agrees with
+# its own 3cb/4cb siblings on 0 of 3105 items while 3cb and 4cb agree on
+# 3105/3105. It also has a different code-usage profile (largest first-digit
+# cell 81 vs 29) and a 0.35% collision rate against their 9.57%/5.57%. That is
+# the signature of a different fit, and it lines up with the 2026-08-20
+# bit-unpacking repair -- `sids/mispacked` exists precisely because the AR
+# rqkmeans 5cb x 512 run was trained on the pre-repair originals. Treat it as
+# its own lineage, never as the 5-digit extension of rqkmeans 3cb x 512.
+NESTED_DEPTH_FAMILIES = {"rqkmeans"}
+NOT_NESTED_EXCEPTIONS = {"rqkmeans_5codebook_512"}
+
+
+def is_nested_family(variant: SidVariant | str) -> bool:
+    """Is this table a truncation of the same fit as its depth siblings?
+
+    False means a depth comparison against its siblings changes the quantizer
+    as well as the number of digits.
+    """
+    if isinstance(variant, str):
+        variant = SidVariant.parse(variant)
+    if variant.name in NOT_NESTED_EXCEPTIONS:
+        return False
+    return variant.quantizer in NESTED_DEPTH_FAMILIES
+
+
+def check_nesting(shallow: "SidTable", deep: "SidTable") -> dict:
+    """Measure, rather than trust, whether `shallow` is a prefix of `deep`.
+
+    The constants above were derived from this; keeping it callable means a new
+    or repaired SID table can be checked instead of inheriting an assumption.
+    """
+    if shallow.variant.codebook_size != deep.variant.codebook_size:
+        raise ValueError("nesting is only defined within one codebook size")
+    if shallow.variant.n_codebook >= deep.variant.n_codebook:
+        raise ValueError("`shallow` must have fewer digits than `deep`")
+    keys = [k for k in shallow.keys if k in deep.asin2codes]
+    d = shallow.variant.n_codebook
+    agree = sum(shallow.asin2codes[k] == deep.asin2codes[k][:d] for k in keys)
+    return {
+        "shallow": shallow.variant.name,
+        "deep": deep.variant.name,
+        "n_compared": len(keys),
+        "n_prefix_agree": agree,
+        "agree_rate": agree / len(keys) if keys else 0.0,
+        "nested": bool(keys) and agree == len(keys),
+    }
