@@ -1,0 +1,69 @@
+[gate] verifying frozen substrate...
+snapshot base-20260826
+  [ok  ] vendor/onediffrec
+  [ok  ] vendor/diffgrm
+  [ok  ] vendor/diffgrm_new
+  [ok  ] sids/index_json
+  [ok  ] sids/mispacked
+  [ok  ] sids/sem_ids/diffgrm
+  [ok  ] sids/sem_ids/diffgrm_new
+  [ok  ] sids/mappings
+  [ok  ] sids/info/next-item
+  [ok  ] sids/info/two-item
+  [ok  ] data/embeddings
+  [ok  ] data/item_meta
+  [ok  ] data/id_maps
+  [ok  ] data/interactions
+  [ok  ] data/reviews
+  [ok  ] data/splits/next-item/train
+  [ok  ] data/splits/next-item/valid
+  [ok  ] data/splits/next-item/test
+  [ok  ] data/splits/two-item/train
+  [ok  ] data/splits/two-item/valid
+  [ok  ] data/splits/two-item/test
+  [ok  ] data/sequences
+  [ok  ] ckpt/diffusion/next1
+  [ok  ] ckpt/diffusion/next1_logs
+  [ok  ] ckpt/diffusion/next2
+  [ok  ] ckpt/diffusion/next2_logs
+  [ok  ] ckpt/ar/next-item_best
+  [ok  ] ckpt/ar/two-item_best
+  [ok  ] ckpt/ar/oneoff_rqvae4cb128
+  [ok  ] ckpt/ar/best_variant_labels
+  [ok  ] base_models/qwen2.5-1.5b-instruct
+  [ok  ] results/sweep_metrics
+  [ok  ] results/sweep_state
+  [ok  ] results/diffusion_transcripts/next1
+  [ok  ] results/diffusion_transcripts/next2
+  [ok  ] results/wandb
+  [ok  ] results/job_manifests
+  [ok  ] results/diagram_data/v1
+  [ok  ] results/diagram_data/v2
+  [ok  ] results/collision_workbook
+  [ok  ] results/slurm_logs
+
+VERIFY OK
+[gate] ok
+[smoke] starting 2026-09-05T06:16:50+04:00
+[smoke] diffusion diff-next1-rqkmeans-3cb-128
+[MODEL] ▶ GUIDED: steps=3, metric=msp, select=least, augment_factor=3
+[DIFF_GRM] Using shared embedding dot-product output layer
+[DIFF_GRM] Using RPG_ED-style encoder: MLP compression + fixed 50-length sequence
+[DIFF_GRM] vocab_size: 387, codebook_size: 128
+[DIFF_GRM] masking_strategy: guided
+        [1, 3, 128] logits, 4 decoder blocks, 18.0s
+[smoke] diffusion diff-next1-rqvae-4cb-128
+[MODEL] ▶ GUIDED: steps=4, metric=msp, select=least, augment_factor=4
+[DIFF_GRM] Using shared embedding dot-product output layer
+[DIFF_GRM] Using RPG_ED-style encoder: MLP compression + fixed 50-length sequence
+[DIFF_GRM] vocab_size: 515, codebook_size: 128
+[DIFF_GRM] masking_strategy: guided
+        [1, 4, 128] logits, 4 decoder blocks, 0.4s
+[smoke] ar next-item_best
+        29 read points, logits [1, 9, 152049], codes/digit {0: 128, 1: 128, 2: 128}, 19.7s
+[smoke] ar oneoff_rqvae4cb128
+        29 read points, logits [1, 12, 152088], codes/digit {0: 39, 1: 128, 2: 128, 3: 128}, 42.7s
+[smoke] ar two-item_best
+        29 read points, logits [1, 12, 152626], codes/digit {0: 238, 1: 235, 2: 246, 3: 242}, 37.4s
+[smoke] wrote /l/users/leo.rodrigues/sidlens/derived/hooks_smoke/result.json
+[smoke] done 2026-09-05T06:18:56+04:00
