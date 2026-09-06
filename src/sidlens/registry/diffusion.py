@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,19 @@ SBATCH_FOR_TASK = {
 }
 RE_VARIANT = re.compile(r"^(?P<q>rqvae|rqkmeans|MQ)_(?P<cb>\d+)codebook_(?P<size>\d+)$")
 RE_STAMP = re.compile(r"AmazonReviews2014_(\w{3})-(\d{2})-(\d{4})_(\d{2})-(\d{2})-(\d{2})")
+
+# These paths are recorded as absolute paths because they are provenance from
+# the machine on which the registry was built.  At runtime they all belong to
+# the frozen snapshot, though, and must follow SIDLENS_WORK when that snapshot
+# is moved to another cluster.  Keeping the expected top-level section beside
+# each field prevents a malformed entry from being silently redirected to an
+# unrelated file under the new root.
+_FROZEN_PATH_FIELDS = {
+    "ckpt_path": "ckpt",
+    "sem_ids_path": "sids",
+    "log_path": "ckpt",
+    "transcript_path": "results",
+}
 
 
 @dataclass(frozen=True)
@@ -267,5 +281,84 @@ def save(entries: dict) -> Path:
     return p
 
 
+def _resolve_frozen_path(value: str, field: str, expected_section: str,
+                         frozen_root: Path) -> Path:
+    """Map one recorded frozen path onto ``frozen_root``.
+
+    Absolute paths in the tracked registry retain where the artifact was
+    originally frozen.  Resolution uses only the suffix beginning at the
+    field's expected frozen section (for example ``ckpt/...``), never an
+    arbitrary suffix supplied by the manifest.
+    """
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a non-empty path string")
+
+    recorded = Path(value)
+    if recorded.is_absolute():
+        parts = recorded.parts
+        markers = [
+            i for i in range(len(parts) - 1)
+            if parts[i] == "frozen" and parts[i + 1] == expected_section
+        ]
+        if len(markers) != 1:
+            raise ValueError(
+                f"{field} is not an unambiguous frozen/{expected_section} path: "
+                f"{value!r}")
+        relative = Path(*parts[markers[0] + 1:])
+    else:
+        # Also accept a future registry that records paths relative to FROZEN.
+        relative = recorded
+
+    if (not relative.parts or relative.parts[0] != expected_section
+            or ".." in relative.parts):
+        raise ValueError(
+            f"{field} must stay below frozen/{expected_section}: {value!r}")
+
+    root = frozen_root.resolve(strict=False)
+    resolved = (root / relative).resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            f"{field} escapes the configured frozen root: {value!r}") from exc
+    return resolved
+
+
+def resolve_entry_paths(entry: dict, frozen_root: Path | None = None) -> dict:
+    """Return an entry whose artifact paths follow the active SIDLENS_WORK.
+
+    The input is never mutated.  Hashes and all other recorded provenance stay
+    byte-for-byte identical; only the four runtime path fields are replaced.
+    Pass ``frozen_root`` mainly for tooling/tests, otherwise ``paths.FROZEN`` is
+    read at call time so environment-specific path configuration is respected.
+    """
+    root = Path(frozen_root) if frozen_root is not None else paths.FROZEN
+    resolved = deepcopy(entry)
+    for field, section in _FROZEN_PATH_FIELDS.items():
+        value = resolved.get(field)
+        if value is None and field == "transcript_path":
+            continue
+        resolved[field] = str(_resolve_frozen_path(value, field, section, root))
+    return resolved
+
+
 def load() -> dict:
+    """Load the tracked registry exactly as recorded.
+
+    Keeping this API raw preserves its original semantics for provenance and
+    audit callers.  Code that opens artifacts should use ``load_runtime``.
+    """
     return json.loads(registry_path().read_text())
+
+
+def load_runtime() -> dict:
+    """Load entries with artifact paths rebased for this installation.
+
+    The tracked JSON is deliberately not rewritten: its absolute paths remain
+    provenance for the source snapshot while runtime consumers follow the
+    active ``SIDLENS_WORK`` root.
+    """
+    return {
+        ckpt_id: resolve_entry_paths(entry)
+        for ckpt_id, entry in load().items()
+    }

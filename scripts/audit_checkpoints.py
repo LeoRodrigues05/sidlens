@@ -167,7 +167,7 @@ def plan_diffusion(category: str = "Industrial_and_Scientific") -> dict[str, Cel
             cells[c.key] = c
 
     try:
-        registry = diffreg.load()
+        registry = diffreg.load_runtime()
     except FileNotFoundError:
         return cells
 

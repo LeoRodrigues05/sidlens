@@ -22,13 +22,12 @@ pipeline, no cache directory, no sentence encoder.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
-from pathlib import Path
 
 import torch
 
-from sidlens import paths, vendorpath
+from sidlens import vendorpath
+from sidlens.registry import diffusion as diffusion_registry
 from sidlens.registry.diffusion import DiffGRMConfig
 
 
@@ -171,7 +170,7 @@ def load_by_id(ckpt_id: str, device: str = "cpu", strict: bool = True):
     site was otherwise re-reading and re-indexing the registry JSON, and one of
     them passed the id straight through and got a confusing TypeError.
     """
-    reg = json.loads((paths.MANIFESTS / "registry.diffusion.json").read_text())
+    reg = diffusion_registry.load_runtime()
     if ckpt_id not in reg:
         raise KeyError(f"unknown diffusion checkpoint {ckpt_id!r}; "
                        f"{len(reg)} known, e.g. {sorted(reg)[:3]}")

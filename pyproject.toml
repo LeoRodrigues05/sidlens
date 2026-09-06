@@ -9,6 +9,7 @@ description = "Mechanistic interpretability of Semantic-ID generative recommende
 requires-python = ">=3.11"
 dependencies = [
     "numpy",
+    "scikit-learn",
     "torch",
     "transformers",
     "pyyaml",
