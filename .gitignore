@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+slurm_logs/
 # Bulk artifacts live on /l/users, never in git.
 scratch/
 venv/
