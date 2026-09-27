@@ -13,8 +13,8 @@
 # Frozen-prediction analysis: CPU only.  The node is pinned at the user's
 # request, but no GPU is requested or used.
 SIDLENS_REPO="${SIDLENS_REPO:-/home/leo.rodrigues/GenRecSys/sidlens/sidlens}"
-if ! source "${SIDLENS_REPO}/scripts/_preamble.sh"; then
-    echo "FATAL: cannot source ${SIDLENS_REPO}/scripts/_preamble.sh" >&2
+if ! source "${SIDLENS_REPO}/scripts/common/_preamble.sh"; then
+    echo "FATAL: cannot source ${SIDLENS_REPO}/scripts/common/_preamble.sh" >&2
     exit 1
 fi
 

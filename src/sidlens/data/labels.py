@@ -1,7 +1,7 @@
 """Attribute labels, with a usability gate in front of them.
 
 `meta.py` serves what the frozen substrate holds: title, description, brand, and
-an empty `categories`. This module serves what `scripts/build_labels.py`
+an empty `categories`. This module serves what `scripts/data/build_labels.py`
 recovered from the public Amazon-2018 dump -- the category hierarchy, price,
 rank, and the co-purchase graph -- joined to the frozen catalogue at 100%.
 
@@ -129,7 +129,7 @@ def load(category: str) -> dict[str, dict]:
     if not path.exists():
         raise FileNotFoundError(
             f"{path} does not exist.\n"
-            f"Build it:  python scripts/build_labels.py --category {category}")
+            f"Build it:  python scripts/data/build_labels.py --category {category}")
     return json.loads(path.read_text())
 
 

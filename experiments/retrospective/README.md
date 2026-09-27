@@ -19,7 +19,7 @@ as a durable array pinned to the requested node:
 
 ```bash
 mkdir -p slurm_logs
-sbatch scripts/retrospective_experiments.sbatch
+sbatch scripts/retrospective/retrospective_experiments.sbatch
 ```
 
 The wrapper runs the frozen-substrate gate, records repository provenance and

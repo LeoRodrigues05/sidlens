@@ -10,12 +10,25 @@ from pathlib import Path
 
 from sidlens import paths
 from sidlens.provenance import hashing, manifest as manifest_mod
+from sidlens.provenance import profiles as profiles_mod
 
 
-def verify_snapshot(snapshot_id: str | None = None, quick: bool = False) -> dict:
+def verify_snapshot(snapshot_id: str | None = None, quick: bool = False,
+                    profile: str | None = None) -> dict:
+    """Check frozen/ and vendor/ against the manifest.
+
+    `profile` limits the frozen check to that profile's files (see
+    `provenance.profiles`). Vendor trees are always checked in full: they are
+    in git, so they are never "not copied". A profiled report still names
+    every section it skipped and counts every file it excluded, so the result
+    cannot be mistaken for a check of the whole snapshot.
+    """
     man = manifest_mod.load(snapshot_id)
+    prof = profiles_mod.get(profile) if profile else None
     cache = hashing.HashCache()
-    report: dict = {"snapshot_id": man["snapshot_id"], "sections": {}, "ok": True}
+    report: dict = {"snapshot_id": man["snapshot_id"], "sections": {}, "ok": True,
+                    "profile": profile, "skipped_sections": [],
+                    "excluded_files": 0}
 
     # --- vendor: one Merkle comparison per tree ------------------------------
     for name, expected_root in man["vendor"]["merkle_roots"].items():
@@ -35,15 +48,23 @@ def verify_snapshot(snapshot_id: str | None = None, quick: bool = False) -> dict
         report["sections"][f"vendor/{name}"] = entry
 
     # --- frozen data ---------------------------------------------------------
+    checked_files: list = []
     for dest, section in man["data"].items():
+        if prof is not None and not prof.selects_section(dest):
+            report["skipped_sections"].append(dest)
+            continue
+        wanted = {rel: rec for rel, rec in section["files"].items()
+                  if prof is None or not prof.excludes(dest, rel)}
+        report["excluded_files"] += len(section["files"]) - len(wanted)
         root = paths.FROZEN / dest
         if not root.exists():
             report["sections"][dest] = {"ok": False, "error": "missing"}
             report["ok"] = False
             continue
         missing, changed, checked = [], [], 0
-        for rel, rec in section["files"].items():
+        for rel, rec in wanted.items():
             p = root / rel
+            checked_files.append(p)
             if not p.exists():
                 missing.append(rel)
                 continue
@@ -58,7 +79,7 @@ def verify_snapshot(snapshot_id: str | None = None, quick: bool = False) -> dict
                 changed.append(rel)
         ok = not missing and not changed
         report["sections"][dest] = {
-            "ok": ok, "kind": section["kind"], "n_files": section["n_files"],
+            "ok": ok, "kind": section["kind"], "n_files": len(wanted),
             "checked": checked, "missing": missing[:20], "changed": changed[:20],
             "n_missing": len(missing), "n_changed": len(changed),
         }
@@ -66,18 +87,21 @@ def verify_snapshot(snapshot_id: str | None = None, quick: bool = False) -> dict
             report["ok"] = False
 
     # --- writability: frozen/ must stay read-only ----------------------------
+    # Unprofiled: every file under every section root, manifest or not.
+    # Profiled: only the files this run was asked to check -- a partial copy
+    # may hold a half-finished download of an excluded file, which is not this
+    # run's call to fail on.
+    if prof is None:
+        candidates = (p for dest in man["data"] if (paths.FROZEN / dest).exists()
+                      for p in hashing.walk_files(paths.FROZEN / dest))
+    else:
+        candidates = (p for p in checked_files if p.exists() and not p.is_symlink())
     writable = []
-    for dest in man["data"]:
-        root = paths.FROZEN / dest
-        if not root.exists():
-            continue
-        for p in hashing.walk_files(root):
-            if p.stat().st_mode & 0o222:
-                writable.append(str(p.relative_to(paths.FROZEN)))
-                if len(writable) >= 20:
-                    break
-        if len(writable) >= 20:
-            break
+    for p in candidates:
+        if p.stat().st_mode & 0o222:
+            writable.append(str(p.relative_to(paths.FROZEN)))
+            if len(writable) >= 20:
+                break
     report["writable_files"] = writable
     if writable:
         report["ok"] = False
@@ -86,6 +110,11 @@ def verify_snapshot(snapshot_id: str | None = None, quick: bool = False) -> dict
 
 def format_report(report: dict, verbose: bool = False) -> str:
     lines = [f"snapshot {report['snapshot_id']}"]
+    if report.get("profile"):
+        lines.append(
+            f"profile  {report['profile']}: {len(report['skipped_sections'])} "
+            f"section(s) skipped, {report['excluded_files']} file(s) excluded "
+            f"-- this is NOT a check of the whole snapshot")
     for name, sec in report["sections"].items():
         mark = "ok  " if sec.get("ok") else "FAIL"
         detail = ""
@@ -112,5 +141,6 @@ def format_report(report: dict, verbose: bool = False) -> str:
         for rel in report["writable_files"][:5]:
             lines.append(f"         - {rel}")
     lines.append("")
-    lines.append("VERIFY OK" if report["ok"] else "VERIFY FAILED")
+    tag = f" (profile {report['profile']})" if report.get("profile") else ""
+    lines.append(("VERIFY OK" if report["ok"] else "VERIFY FAILED") + tag)
     return "\n".join(lines)

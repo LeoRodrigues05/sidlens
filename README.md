@@ -7,7 +7,7 @@ compute internally, when they compute it, and whether those computations
 causally affect the recommendation.
 
 The full research plan is in the
-[project brief](data/LeoRodrigues_ProjectProposal_GenRec_MechInterpAnalysis.pdf).
+[project brief](docs/plans/LeoRodrigues_ProjectProposal_GenRec_MechInterpAnalysis.pdf).
 
 ## Project scope
 
@@ -59,8 +59,12 @@ it does not mean that every model-side or causal question has been answered.
 
 The current implementation includes SID/data loaders, AR and DiffGRM model
 loaders, observation-only hooks, the Experiment 1 item atlas, and Experiment 2
-geometry/refinement. `probes/`, `sae/`, `interventions/`, and `viz/` are still
-scaffolds.
+geometry/refinement. The semantic mapping explorer adds searchable prefix and
+digit-position groups, complete item exports, indexed SQLite lookup, and
+category-coherence checks across all 27 variants. See the
+[mapping results and commands](docs/results/semantic_mapping/SEMANTIC_MAPPING_RESULTS.md) and the
+[fixed reveal-order experiment](experiments/controlled/exp2_fixed_orders/README.md).
+`probes/`, `sae/`, and `interventions/` are still scaffolds.
 
 ## Why this is a separate repository
 
@@ -146,7 +150,7 @@ weights were deleted, and 84 cells that were never trained. It also finds the
 one-off RQ-VAE AR weight as an intentional registry orphan. Run:
 
 ```bash
-"${SIDLENS_WORK}/venv/bin/python" scripts/audit_checkpoints.py --missing-only
+"${SIDLENS_WORK}/venv/bin/python" scripts/provenance/audit_checkpoints.py --missing-only
 ```
 
 Exact SID tables are enough for the current static atlas and decoder-facing
@@ -356,17 +360,25 @@ must depend on successful export rather than simply on successful evaluation.
 sidlens/
   vendor/          byte-frozen upstream code; never edit
   src/sidlens/     data, model, hook, analysis, and provenance code
-  experiments/     executable experiment entry points
-  scripts/         SLURM wrappers, audits, and data preparation
+  experiments/     entry points by task: structure/, retrospective/,
+                   controlled/, paper_www27/
+  scripts/         SLURM wrappers and tools by task: common/ (shared preamble,
+                   site.env example), data/, provenance/, structure/,
+                   retrospective/, controlled/, activations/
+  docs/            plans/, results/, clusters/, paper/
   manifests/       checked-in snapshot and checkpoint registries
-  tests/           consistency and regression tests
+  requirements/    pip-freeze records of the environments results came from
+  tests/           pytest, grouped like the code: data/, models/, hooks/,
+                   analysis/, provenance/, experiments/
+  data/            gitignored upstream data tarball (not read by SidLens)
 
 $SIDLENS_WORK/
   frozen/          immutable, hash-verified training substrate
   external/        post-training metadata and labels with their own manifests
   derived/         atlases, geometry, activations, probes, SAEs, and figures
   runs/            new self-contained training exports
-  cache/           disposable caches
+  bundles/         transfer manifests written by `sidlens bundle create/pull`
+  cache/           disposable caches (incl. bundle-stage/ upload mirrors)
   venv/            cluster-specific environment; rebuild, do not transfer
 ```
 
@@ -399,176 +411,46 @@ chmod -R a-w "${SIDLENS_WORK}/frozen" vendor
 
 ## Moving to another cluster
 
-There is currently no Git remote configured. The move therefore has two
-independent parts: publish or bundle the Git history, then copy the non-Git
-data.
+The full runbook is [docs/clusters/CROSS_CLUSTER.md](docs/clusters/CROSS_CLUSTER.md). It covers
+what the AR activation/intervention work needs, setup on the target, measured
+activation sizes, and sending results back. The prompt for the agent on the
+upstream cluster is [docs/clusters/AR_CLUSTER_PROMPT.md](docs/clusters/AR_CLUSTER_PROMPT.md).
 
-### 1. Commit and publish the Git repository
+| What | How it moves |
+|---|---|
+| Code | Git: `origin` is `https://github.com/LeoRodrigues05/sidlens`. Commit untracked work before cloning elsewhere |
+| `frozen/`, `external/{amazon2018,labels}`, `derived/` | `sidlens bundle create/push/pull` through a private HF dataset repo. Profiles: `core` (no weights, 3.0 GB), `ar` (+ AR weights, 12.3 GB), `full` (15.3 GB) |
+| New results (activations, interventions) | `sidlens bundle create --profile results --extra derived/<exp>/<run>`, then push to a second private repo |
+| `env/`/`venv/`, `cache/` | Not moved. Rebuild; `requirements/lock-20260925-cu124.txt` records this environment |
 
-From the current cluster, replace the example URL with an empty repository you
-can reach from both clusters:
+Acceptance on the target is a hash check, never the transport. Frozen files are
+checked against `manifests/provenance.<snapshot>.json`, the rest against the
+bundle manifest. A cluster holding only part of the substrate sets
+`SIDLENS_VERIFY_PROFILE` in `~/.config/sidlens/site.env` (see
+`scripts/common/site.env.example`), and every job's gate then runs
+`sidlens verify --profile <name>` and logs that it did. A direct `rsync`
+between clusters is equally valid if both can reach each other; accept it
+with `sidlens verify --strict [--profile ...]` and `sidlens bundle check`.
 
-```bash
-cd /home/leo.rodrigues/GenRecSys/sidlens/sidlens
-git status --short
-git add -- README.md \
-  pyproject.toml \
-  scripts/audit_checkpoints.py \
-  src/sidlens/models/diffusion.py \
-  src/sidlens/registry/diffusion.py \
-  tests/test_diffusion_registry.py
-git diff --cached --check
-git diff --cached
-git commit -m "Document migration and make registry paths portable"
+Portability notes that still apply:
 
-REMOTE_URL='git@your-git-host:your-group/sidlens.git'
-git remote add origin "${REMOTE_URL}"
-git push -u origin master
-```
+1. `manifests/registry.diffusion.json` deliberately keeps the source
+   snapshot's absolute paths as provenance. The registry loader rebases them
+   onto `$SIDLENS_WORK/frozen` at runtime. Set `SIDLENS_WORK` before starting
+   Python; do not hand-edit the manifest to relocate it.
+2. Older SLURM wrappers pin this cluster's partition and node, and the
+   vendored training launchers keep old account/partition/path values as
+   provenance. Override at submission or copy the wrapper; never edit
+   `vendor/`. `scripts/activations/ar_capture.sbatch` is site-neutral.
+3. `external/onediffrec_data/` and `data/OneDiffRec_data.tar.gz` (sha256
+   `c3ab0bedf84bd52cfc79f281e358518792d01f96e1a58ab68bbdd56c8374ce89`) are not
+   in any bundle. No SidLens code reads them, but they are the only local copy
+   of the Office SFT CSVs. Never extract that archive over `frozen/`: five
+   Industrial RQ-KMeans tables in it predate the repair.
+4. The old `sidlens-transfer-20260827.zip` is not a code source and holds no
+   extra weights; its `setup/` and `extras/` trees are optional forensic
+   provenance.
 
-If `origin` is added before these commands are run, replace `git remote add`
-with `git remote set-url origin "${REMOTE_URL}"`.
-
-On the target cluster:
-
-```bash
-REMOTE_URL='git@your-git-host:your-group/sidlens.git'
-git clone "${REMOTE_URL}" <TARGET_CODE_ROOT>/sidlens
-cd <TARGET_CODE_ROOT>/sidlens
-git switch master
-```
-
-If neither cluster can reach a shared Git host, create an offline bundle after
-committing; a bundle contains Git history but still no bulk data:
-
-```bash
-git bundle create ../sidlens.bundle --all
-scp ../sidlens.bundle <USER>@<TARGET_HOST>:<TRANSFER_ROOT>/
-```
-
-Then on the target:
-
-```bash
-git clone <TRANSFER_ROOT>/sidlens.bundle <TARGET_CODE_ROOT>/sidlens
-```
-
-### 2. Copy the required non-Git data
-
-Current migration inventory:
-
-| Source | Approximate size | Action |
-|---|---:|---|
-| `$SIDLENS_WORK/frozen/` | 14.75 GB logical | Required; copy in full |
-| `$SIDLENS_WORK/derived/` | 57 MB logical | Recommended; preserves completed atlas, geometry/refinement, and hook reports |
-| `$SIDLENS_WORK/external/amazon2018/` and `external/labels/` | Under 100 MB | Required for the labelled Experiment 1 workflow |
-| `$SIDLENS_WORK/runs/` | Currently negligible | Optional now; required once it contains new exports |
-| `$SIDLENS_WORK/cache/` | Negligible/regenerable | Do not copy |
-| `$SIDLENS_WORK/env/` or `venv/` | About 6.6 GB logical | Do not copy; rebuild for the target CUDA stack |
-| `$SIDLENS_WORK/external/onediffrec_data/` | About 5.65 GB logical | Optional raw-source fallback; current SidLens code does not read it |
-| `data/OneDiffRec_data.tar.gz` | 1.67 GB | Optional ignored source archive; redundant once canonical inputs are frozen |
-
-If the target does not already expose byte-equivalent upstream training data,
-transfer either the extracted `external/onediffrec_data/` tree or its compact
-archive, not both. The archive SHA-256 is
-`c3ab0bedf84bd52cfc79f281e358518792d01f96e1a58ab68bbdd56c8374ce89`.
-Never extract that archive over `frozen/`: five authoritative Industrial
-RQ-KMeans tables contain later repairs and differ from the archived source.
-
-The old `sidlens-transfer-20260827.zip` is not a current code source and has no
-additional model weights. It mostly duplicates Git plus `frozen/`. Its small
-`setup/` and `extras/` trees can be retained as optional forensic provenance;
-the full 13.46 GB archive does not need to be copied when using Git and
-`rsync`.
-
-Example direct transfer from the current cluster, without deleting anything at
-the destination:
-
-```bash
-ssh <USER>@<TARGET_HOST> \
-  'mkdir -p <TARGET_WORK_ROOT>/sidlens/external'
-
-rsync -rtlpHS --partial --info=progress2 \
-  /l/users/leo.rodrigues/sidlens/frozen \
-  /l/users/leo.rodrigues/sidlens/derived \
-  <USER>@<TARGET_HOST>:<TARGET_WORK_ROOT>/sidlens/
-
-rsync -rtlpHS --partial --info=progress2 \
-  /l/users/leo.rodrigues/sidlens/external/amazon2018 \
-  /l/users/leo.rodrigues/sidlens/external/labels \
-  <USER>@<TARGET_HOST>:<TARGET_WORK_ROOT>/sidlens/external/
-```
-
-The immutable tree has its own hash manifest, so `rsync` transport checks are
-not the final acceptance test.
-
-### 3. Configure and verify the target
-
-Set these variables in the login shell and in every SLURM job:
-
-```bash
-export SIDLENS_REPO=<TARGET_CODE_ROOT>/sidlens
-export SIDLENS_WORK=<TARGET_WORK_ROOT>/sidlens
-```
-
-Rebuild a Python 3.11 environment against the target cluster's supported CUDA
-and GPU stack. The current `pyproject.toml` names runtime dependencies but is
-not a reproducibility lock, so capture a lock or container specification before
-accepting new experiment runs. Do not copy the old environment directory:
-virtual environments embed paths, and its PyTorch/CUDA build may not match the
-new nodes.
-
-```bash
-python3.11 -m venv "${SIDLENS_WORK}/venv"
-"${SIDLENS_WORK}/venv/bin/python" -m pip install --upgrade pip
-# Install the target cluster's supported PyTorch/CUDA build first if required.
-"${SIDLENS_WORK}/venv/bin/python" -m pip install -e "${SIDLENS_REPO}"
-"${SIDLENS_WORK}/venv/bin/python" -m pip install pytest
-```
-
-Then restore immutability and run the acceptance checks:
-
-```bash
-chmod -R a-w "${SIDLENS_WORK}/frozen" "${SIDLENS_REPO}/vendor"
-"${SIDLENS_WORK}/venv/bin/python" -m sidlens.cli verify --strict
-
-printf '%s  %s\n' \
-  '2d0fde57bfa563108c78076d5975515124ab6175d6a1380cc990cddd7f6f20b8' \
-  "${SIDLENS_WORK}/external/amazon2018/meta_Industrial_and_Scientific.json.gz" \
-  | sha256sum -c -
-"${SIDLENS_WORK}/venv/bin/python" \
-  "${SIDLENS_REPO}/scripts/build_labels.py" \
-  --category Industrial_and_Scientific
-printf '%s  %s\n' \
-  'b9b25e9e98a3d3a173341176ea5e5500ab7c7186616c87ad532c04e7be9b5a50' \
-  "${SIDLENS_WORK}/external/labels/Industrial_and_Scientific.labels.json" \
-  | sha256sum -c -
-
-"${SIDLENS_WORK}/venv/bin/python" -m pytest "${SIDLENS_REPO}/tests" -q
-"${SIDLENS_WORK}/venv/bin/python" \
-  "${SIDLENS_REPO}/scripts/audit_checkpoints.py" --missing-only
-```
-
-The label build writes only to `external/`. Re-running it on the target keeps
-the derived label table deterministic while updating its manifest paths to the
-new cluster.
-
-The checkpoint audit intentionally exits with status 1 while planned cells are
-missing; use its summary as an inventory, not as evidence that the copied
-snapshot failed verification.
-
-Two portability notes apply on the target:
-
-1. `manifests/registry.diffusion.json` deliberately retains the absolute paths
-   of the source snapshot as provenance. The registry loader rebases its
-   checkpoint, SID, log, and transcript paths at runtime onto
-   `$SIDLENS_WORK/frozen`; set `SIDLENS_WORK` before starting Python or a job.
-   Do not hand-edit or regenerate the tracked manifest merely to relocate it.
-2. Existing SLURM wrappers contain site-specific defaults, and vendored
-   training launchers preserve old account, partition, QoS, and path values as
-   provenance. Export `SIDLENS_REPO`/`SIDLENS_WORK` and create new wrappers for
-   the target scheduler; do not edit `vendor/`.
-
-Finally, do not point analyses directly at mutable training-run directories on
-the new cluster. Export the required run bundle, hash it, and either register
-it under `runs/` or promote a reviewed snapshot before using it as experimental
-evidence.
+Do not point analyses at mutable training-run directories on the new cluster.
+Export the run bundle, hash it, and register it under `runs/` (see the run
+export contract above) before using it as evidence.
