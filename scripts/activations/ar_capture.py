@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import json
 import sys
 import time
@@ -49,6 +50,7 @@ import torch                                                  # noqa: E402
 
 from sidlens import hooks as H, paths                         # noqa: E402
 from sidlens.data import ar_prompts as P                      # noqa: E402
+from sidlens.data.sids import SidTable                        # noqa: E402
 from sidlens.hooks.store import StoreWriter                   # noqa: E402
 from sidlens.models import ar                                 # noqa: E402
 from sidlens.provenance import hashing, manifest as manifest_mod  # noqa: E402
@@ -106,6 +108,56 @@ def digit_scores(lg_rows, e: P.Encoded, vocab) -> list[dict]:
     return rows
 
 
+def catalogue_trie(table: SidTable, n: int):
+    """prefix -> legal next codes, and prefix -> one catalogue completion (a placeholder)."""
+    nxt: dict[tuple, set] = {}
+    comp: dict[tuple, tuple] = {}
+    for row in map(tuple, table.codes.tolist()):
+        for d in range(n):
+            nxt.setdefault(row[:d], set()).add(row[d])
+            comp.setdefault(row[:d], row)
+    return {k: sorted(v) for k, v in nxt.items()}, comp
+
+
+def self_greedy(model, examples, tok, vocab, template, device, batch_size):
+    """The model's trie-constrained greedy SID for every (single-slot) example.
+
+    Digit d is read at `predict_pos(0, d)` of a teacher-forced input whose first
+    d target digits are the greedy digits so far and whose later digits are a
+    catalogue placeholder. The model is causal, so tokens after the read
+    position cannot change it; the placeholder only keeps the prompt a valid,
+    fully labelled SID string. Returns (sids, per-digit code log-probs).
+    """
+    from sidlens.interventions.history import sid_string
+    n = vocab.variant.n_codebook
+    nxt, comp = catalogue_trie(SidTable.load(vocab.variant), n)
+    prefixes = [()] * len(examples)
+    logps = [[] for _ in examples]
+    for d in range(n):
+        for b in range(0, len(examples), batch_size):
+            idx = range(b, min(len(examples), b + batch_size))
+            encs = [P.encode(dataclasses.replace(examples[i], target_sids=(sid_string(comp[prefixes[i]]),)),
+                             tok, vocab, template=template, with_target=True) for i in idx]
+            c = P.collate(encs, pad_id=tok.pad_token_id, side="right")
+            kw = {k: c[k].to(device) for k in ("input_ids", "attention_mask", "position_ids")}
+            with torch.no_grad():
+                h = model.model(**kw).last_hidden_state
+                pos = torch.tensor([int(c["offset"][r]) + e.predict_pos(0, d) for r, e in enumerate(encs)],
+                                   device=h.device)
+                lg = model.lm_head(h[torch.arange(len(encs), device=h.device), pos]).float()
+            for r, i in enumerate(idx):
+                legal = nxt[prefixes[i]]
+                ids = torch.tensor([vocab.id_of(d, cc) for cc in legal], device=lg.device)
+                sub = lg[r].index_select(0, ids)
+                j = int(sub.argmax())
+                all_ids = torch.as_tensor(vocab.ids(d), device=lg.device)
+                lp = torch.log_softmax(lg[r].index_select(0, all_ids), -1)
+                logps[i].append(float(lp[vocab.codes(d).index(legal[j])]))
+                prefixes[i] = prefixes[i] + (legal[j],)
+        print(f"[self-greedy] digit {d} done", flush=True)
+    return [sid_string(p) for p in prefixes], logps
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--ckpt", required=True, choices=sorted(ar.AR_CHECKPOINTS))
@@ -121,6 +173,9 @@ def main(argv=None) -> int:
     ap.add_argument("--dtype", default=None,
                     help="default bfloat16 on cuda (as evaluate.py), float32 on cpu")
     ap.add_argument("--shard-gb", type=float, default=1.0)
+    ap.add_argument("--target", default="golden", choices=("golden", "self-greedy"),
+                    help="self-greedy: replace the target slot by the model's own trie-constrained "
+                         "greedy SID (next-item only); history/header positions are unchanged")
     ap.add_argument("--out", type=Path, required=True, help="must not exist")
     args = ap.parse_args(argv)
     t0 = time.time()
@@ -140,11 +195,22 @@ def main(argv=None) -> int:
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation)[:2000]}")
     examples = examples[:args.limit] if args.limit else examples
-    encoded = [P.encode(ex, tok, vocab, template=args.template, with_target=True)
-               for ex in examples]
+    if args.target == "self-greedy" and task != "next-item":
+        raise ValueError("--target self-greedy is defined for single-slot next-item rows only")
 
     sha = checkpoint_sha(args.ckpt)
     model = ar.load_model(args.ckpt, device=args.device, dtype=dtype)
+    greedy = None
+    if args.target == "self-greedy":
+        sids, lps = self_greedy(model, examples, tok, vocab, args.template, args.device, args.batch_size)
+        greedy = [{"example_id": ex.example_id, "row": ex.row, "user_id": ex.user_id,
+                   "golden_sid": ex.target_sids[0], "greedy_sid": g,
+                   "greedy_logp_codes": ";".join(f"{x:.6f}" for x in lp)}
+                  for ex, g, lp in zip(examples, sids, lps)]
+        examples = [dataclasses.replace(ex, target_sids=(g,), target_item_ids=(-1,))
+                    for ex, g in zip(examples, sids)]
+    encoded = [P.encode(ex, tok, vocab, template=args.template, with_target=True)
+               for ex in examples]
     n_layers = model.config.num_hidden_layers
     want = args.layers.split(",")
     idx = range(n_layers) if "all" in want else [int(x) for x in want if x != "norm"]
@@ -158,9 +224,14 @@ def main(argv=None) -> int:
             "template": args.template, "dtype": dtype, "device": args.device,
             "sites_are": "decoder-layer outputs (residual stream after the block)",
             "roles": list(roles), "batch_size": args.batch_size, "padding": "right",
-            "teacher_forced": True, "n_examples": len(encoded),
+            "teacher_forced": True, "target": args.target, "n_examples": len(encoded),
             "torch": torch.__version__}
     args.out.mkdir(parents=True, exist_ok=False)
+    if greedy is not None:
+        with open(args.out / "self_greedy.csv", "w", newline="") as fh:
+            wr = csv.DictWriter(fh, fieldnames=list(greedy[0]))
+            wr.writeheader()
+            wr.writerows(greedy)
     (args.out / "arguments.json").write_text(json.dumps(
         {k: str(v) for k, v in vars(args).items()}, indent=1))
 
@@ -208,7 +279,9 @@ def main(argv=None) -> int:
     by_digit: dict = {}
     for r in scores:
         by_digit.setdefault(f"{r['slot']}.{r['digit']}", []).append(r["rank"] == 0)
-    summary = {"n_examples": len(encoded), "n_layers_stored": len(names),
+    summary = {"n_examples": len(encoded), "n_layers_stored": len(names), "target": args.target,
+               **({"greedy_equals_golden": sum(g["greedy_sid"] == g["golden_sid"] for g in greedy) / len(greedy)}
+                  if greedy is not None else {}),
                "digit_top1": {k: sum(v) / len(v) for k, v in by_digit.items()},
                "seconds": round(time.time() - t0, 1)}
     (args.out / "validation.json").write_text(json.dumps(

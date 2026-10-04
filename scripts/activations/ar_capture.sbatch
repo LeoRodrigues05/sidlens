@@ -58,7 +58,8 @@ sidlens_provenance_stamp "${OUT}/.provenance"
 {
     git ls-files -z src/sidlens vendor/onediffrec
     printf '%s\0' scripts/common/_preamble.sh scripts/activations/ar_capture.py scripts/activations/ar_capture.sbatch \
-        src/sidlens/data/ar_prompts.py src/sidlens/hooks/store.py pyproject.toml
+        src/sidlens/data/ar_prompts.py src/sidlens/data/sids.py src/sidlens/interventions/history.py \
+        src/sidlens/hooks/store.py pyproject.toml
     find manifests -maxdepth 1 -type f \( -name '*.json' -o -name CURRENT \) -print0
 } | sort -zu > "${OUT}/source-files.nul"
 xargs -0 sha256sum < "${OUT}/source-files.nul" > "${OUT}/source.sha256"

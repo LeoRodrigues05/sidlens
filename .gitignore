@@ -12,3 +12,7 @@ venv/
 # The 1.6 GB upstream data tarball the user drops in data/. Extracted to
 # $SIDLENS_WORK/external/onediffrec_data and hashed there.
 data/*.tar.gz
+
+# Paper drafts, archives, writing guides and paper-number exports stay local; never pushed.
+docs/paper/
+experiments/paper_www27/

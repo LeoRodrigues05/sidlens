@@ -1,0 +1,490 @@
+<title>SidLens Interventions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wdth,wght@0,85..100,400..700;1,100,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --page: #f4f5f7; --surface: #fcfcfb; --surface-2: #eff1f4;
+  --ink: #101318; --ink-2: #4a505a; --muted: #80868f;
+  --grid: #e3e5e9; --axis: #c3c7cd; --rule: #dcdfe4; --ring: rgba(16,19,24,0.10);
+  --s-rqk: #2a78d6; --s-rqvae: #eb6834; --s-mq: #1baf7a; --s-ctx: #9ba1aa;
+  --good: #0ca30c; --good-ink: #006300; --crit: #d03b3b; --crit-ink: #a52626; --part-ink: #7a5b00; --part: #eda100;
+  --h1: #cde2fb; --h2: #b7d3f6; --h3: #9ec5f4; --h4: #86b6ef; --h5: #6da7ec; --h6: #5598e7; --h7: #3987e5;
+  --h8: #2a78d6; --h9: #256abf; --h10: #1c5cab; --h11: #184f95; --h12: #104281; --h13: #0d366b;
+  --age0: #14171c; --age1: #4a505a; --age2: #7d838c; --age3: #a9aeb6;
+  --band: 0.13;
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0e0f11; --surface: #1a1a19; --surface-2: #232427;
+    --ink: #f2f3f5; --ink-2: #c1c5cc; --muted: #8b9099;
+    --grid: #2c2c2a; --axis: #3a3b3e; --rule: #2b2d31; --ring: rgba(255,255,255,0.10);
+    --s-rqk: #3987e5; --s-rqvae: #d95926; --s-mq: #199e70; --s-ctx: #6e747d;
+    --good-ink: #3ec43e; --crit-ink: #ec7a7a; --part-ink: #e0b440;
+    --h1: #13243a; --h2: #15304f; --h3: #173b63; --h4: #184f95; --h5: #1c5cab; --h6: #256abf; --h7: #2a78d6;
+    --h8: #3987e5; --h9: #5598e7; --h10: #6da7ec; --h11: #86b6ef; --h12: #9ec5f4; --h13: #cde2fb;
+    --age0: #f2f3f5; --age1: #c1c5cc; --age2: #8b9099; --age3: #62666e;
+    --band: 0.18;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0e0f11; --surface: #1a1a19; --surface-2: #232427;
+  --ink: #f2f3f5; --ink-2: #c1c5cc; --muted: #8b9099;
+  --grid: #2c2c2a; --axis: #3a3b3e; --rule: #2b2d31; --ring: rgba(255,255,255,0.10);
+  --s-rqk: #3987e5; --s-rqvae: #d95926; --s-mq: #199e70; --s-ctx: #6e747d;
+  --good-ink: #3ec43e; --crit-ink: #ec7a7a; --part-ink: #e0b440;
+  --h1: #13243a; --h2: #15304f; --h3: #173b63; --h4: #184f95; --h5: #1c5cab; --h6: #256abf; --h7: #2a78d6;
+  --h8: #3987e5; --h9: #5598e7; --h10: #6da7ec; --h11: #86b6ef; --h12: #9ec5f4; --h13: #cde2fb;
+  --age0: #f2f3f5; --age1: #c1c5cc; --age2: #8b9099; --age3: #62666e;
+  --band: 0.18;
+}
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.6;
+  padding-inline: 20px; padding-block: 0 64px; -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1040px; margin: 0 auto; }
+.col { max-width: 700px; }
+a { color: inherit; text-decoration-color: var(--axis); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--ink); }
+a:focus-visible, [tabindex]:focus-visible, summary:focus-visible { outline: 2px solid var(--s-rqk); outline-offset: 2px; border-radius: 3px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.15; margin: 0; }
+p { margin: 0; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+
+header.top { padding-block: 56px 28px; display: flex; flex-direction: column; gap: 18px; border-bottom: 1px solid var(--rule); }
+.eyebrow { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+h1 { font-size: clamp(34px, 5.2vw, 56px); font-weight: 650; font-stretch: 88%; letter-spacing: -0.02em; }
+.dek { font-size: 19px; color: var(--ink-2); max-width: 700px; line-height: 1.5; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); }
+.meta b { color: var(--ink-2); font-weight: 600; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-block: 28px 8px; }
+.tile { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 16px 16px 14px;
+  display: flex; flex-direction: column; gap: 6px; }
+.tv { font-size: 27px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.1; }
+.tv .sep { color: var(--muted); font-weight: 400; margin: 0 1px; }
+.tv small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 5px; }
+.tl { font-size: 14px; color: var(--ink-2); line-height: 1.4; }
+.ts { font-size: 11.5px; color: var(--muted); margin-top: auto; }
+
+.summary { margin-block: 26px 10px; display: grid; grid-template-columns: minmax(0, 700px) minmax(0, 1fr); gap: 36px; align-items: start; }
+.summary .lead p + p { margin-top: 14px; }
+.summary .lead p { font-size: 17px; }
+nav.toc { font-size: 14px; border-left: 1px solid var(--rule); padding-left: 18px; display: flex; flex-direction: column; gap: 7px; }
+nav.toc .eyebrow { margin-bottom: 4px; }
+nav.toc a { text-decoration: none; color: var(--ink-2); display: flex; gap: 10px; }
+nav.toc a span { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.4em; }
+nav.toc a:hover { color: var(--ink); }
+
+section { padding-block: 44px 8px; border-top: 1px solid var(--rule); margin-top: 40px; display: flex; flex-direction: column; gap: 20px; }
+section > .head { display: flex; flex-direction: column; gap: 8px; }
+.sno { font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+h2 { font-size: clamp(25px, 3.2vw, 33px); font-weight: 650; font-stretch: 90%; letter-spacing: -0.015em; }
+h3 { font-size: 18px; font-weight: 650; }
+section p { max-width: 700px; }
+.expts { font-size: 13px; color: var(--muted); }
+.expts code { color: var(--ink-2); }
+
+figure { margin: 6px 0 4px; background: var(--surface); border: 1px solid var(--ring); border-radius: 12px;
+  padding: 20px 20px 14px; display: flex; flex-direction: column; gap: 12px; }
+.ft { display: flex; flex-direction: column; gap: 3px; }
+.fttl { font-size: 17px; font-weight: 650; }
+.fsub { font-size: 14px; color: var(--ink-2); line-height: 1.45; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+.lg { display: inline-flex; align-items: center; gap: 7px; }
+.key { display: inline-block; flex: none; }
+.key.line { width: 16px; height: 0; border-top: 2.5px solid currentColor; border-radius: 2px; }
+.key.dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.key.s-rqk { color: var(--s-rqk); } .key.s-rqvae { color: var(--s-rqvae); } .key.s-mq { color: var(--s-mq); } .key.s-ctx { color: var(--s-ctx); }
+.key.line.dash { border-top-style: dashed; }
+.key.s-age0 { color: var(--age0); } .key.s-age1 { color: var(--age1); } .key.s-age2 { color: var(--age2); } .key.s-age3 { color: var(--age3); }
+.cap { font-size: 13px; color: var(--muted); line-height: 1.5; max-width: none; }
+details { font-size: 13px; }
+summary { cursor: pointer; color: var(--ink-2); width: max-content; }
+.tw { overflow-x: auto; margin-top: 10px; max-height: 340px; overflow-y: auto; border: 1px solid var(--rule); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--ink-2); background: var(--surface-2); position: sticky; top: 0; }
+td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.prose-table { border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; background: var(--surface); }
+.prose-table table { font-size: 14px; }
+.prose-table td, .prose-table th { padding: 9px 12px; }
+.prose-table tr:last-child td { border-bottom: none; }
+
+.multi { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 26px; }
+.multi.heats { grid-template-columns: repeat(2, minmax(0, 260px)); justify-content: start; }
+.panel { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ptitle { font-size: 13.5px; font-weight: 600; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.ptitle span { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; font-family: var(--sans); }
+svg .grid { stroke: var(--grid); stroke-width: 1; }
+svg .axis { stroke: var(--axis); stroke-width: 1; }
+svg .ref { stroke: var(--axis); stroke-width: 1; }
+svg .tick { fill: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+svg .axlab { fill: var(--ink-2); font-size: 12px; }
+svg .endlab { fill: var(--ink-2); font-size: 12px; }
+svg .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg .band { stroke: none; opacity: var(--band); }
+svg .dot { stroke: var(--surface); stroke-width: 2; }
+svg .hit { fill: transparent; cursor: default; }
+svg .hit:hover { fill: var(--ink); fill-opacity: 0.06; }
+.ln.s-rqk { stroke: var(--s-rqk); } .ln.s-rqvae { stroke: var(--s-rqvae); } .ln.s-mq { stroke: var(--s-mq); } .ln.s-ctx { stroke: var(--s-ctx); }
+.band.s-rqk, .dot.s-rqk { fill: var(--s-rqk); } .band.s-rqvae, .dot.s-rqvae { fill: var(--s-rqvae); }
+.band.s-mq, .dot.s-mq { fill: var(--s-mq); } .band.s-ctx, .dot.s-ctx { fill: var(--s-ctx); }
+svg .ln.dash { stroke-dasharray: 5 4; }
+.ln.s-age0 { stroke: var(--age0); } .ln.s-age1 { stroke: var(--age1); } .ln.s-age2 { stroke: var(--age2); } .ln.s-age3 { stroke: var(--age3); }
+.dot.s-age0 { fill: var(--age0); } .dot.s-age1 { fill: var(--age1); } .dot.s-age2 { fill: var(--age2); } .dot.s-age3 { fill: var(--age3); }
+svg.heat .cell { stroke: none; }
+svg.heat .cell.cellneg { fill: var(--surface-2); }
+svg.heat .cell:hover { opacity: 0.8; }
+svg.heat .sel { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.h1 { fill: var(--h1); } .h2 { fill: var(--h2); } .h3 { fill: var(--h3); } .h4 { fill: var(--h4); } .h5 { fill: var(--h5); }
+.h6 { fill: var(--h6); } .h7 { fill: var(--h7); } .h8 { fill: var(--h8); } .h9 { fill: var(--h9); } .h10 { fill: var(--h10); }
+.h11 { fill: var(--h11); } .h12 { fill: var(--h12); } .h13 { fill: var(--h13); }
+.scalelegend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.scalelegend .ramp { display: flex; height: 10px; width: 180px; border-radius: 3px; overflow: hidden; }
+.scalelegend .ramp i { flex: 1; }
+
+.forest { display: flex; flex-direction: column; }
+.frow { display: grid; grid-template-columns: minmax(0, 44%) minmax(0, 1fr); gap: 16px; align-items: center;
+  padding-block: 6px; border-bottom: 1px solid var(--grid); }
+.frow.faxis { border-bottom: none; padding-top: 4px; align-items: start; }
+.flab { font-size: 13.5px; color: var(--ink-2); line-height: 1.35; }
+.fplot { position: relative; }
+.fplot svg.strip { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fplot svg .grid, .fplot svg .zero { vector-effect: non-scaling-stroke; }
+.fplot svg .zero { stroke: var(--axis); stroke-width: 1.5; }
+.ci { position: absolute; height: 2px; border-radius: 1px; }
+.pt { position: absolute; width: 10px; height: 10px; border-radius: 50%; transform: translateX(-50%);
+  box-shadow: 0 0 0 2px var(--surface); cursor: default; }
+.pt::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; }
+.ci.s-rqk, .pt.s-rqk { background: var(--s-rqk); } .ci.s-rqvae, .pt.s-rqvae { background: var(--s-rqvae); }
+.ci.s-mq, .pt.s-mq { background: var(--s-mq); }
+.ticks { position: relative; height: 16px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ticks span { position: absolute; transform: translateX(-50%); }
+.axlab-h { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+
+.vd { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--surface-2); }
+.vd b { font-size: 11px; width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; }
+.vd.held { color: var(--good-ink); } .vd.held b { background: var(--good); }
+.vd.failed { color: var(--crit-ink); } .vd.failed b { background: var(--crit); }
+.vd.partial { color: var(--part-ink); } .vd.partial b { background: var(--part); color: #1a1a19; }
+.callout { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 16px 18px; max-width: 700px; }
+.callout h3 { margin-bottom: 6px; }
+ul.plain { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; max-width: 700px; }
+.audit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--muted); }
+
+#tip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--ring);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.14); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.4; max-width: 280px; }
+#tip .v { font-weight: 650; font-size: 14px; font-variant-numeric: tabular-nums; }
+#tip .l { color: var(--ink-2); }
+
+@media (max-width: 860px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary { grid-template-columns: minmax(0, 1fr); }
+  nav.toc { border-left: none; padding-left: 0; }
+  .audit { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  body { padding-inline: 16px; }
+  .multi, .multi.heats { grid-template-columns: minmax(0, 1fr); }
+  .frow { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .frow.faxis .flab { display: none; }
+  .tv { font-size: 23px; }
+  figure { padding: 16px 14px 12px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">SidLens · causal interventions on Semantic-ID recommenders · updated 2026-09-30</div>
+  <h1>How the SID recommenders use history</h1>
+  <p class="dek">Intervention experiments, a timestamp audit and two activation studies on the Qwen AR and DiffGRM
+    recommenders. In both paradigms, most of the next item comes from copying: the most recent item sets the first digit,
+    and each later digit is read from a history item that already matches the prefix. The models copy by position in the
+    list, while in the data it is an item from the same day that predicts the next one.</p>
+  <div class="meta"><span><b>Catalogue</b> Amazon Industrial &amp; Scientific, 3,105 items</span>
+    <span><b>Snapshot</b> base-20260826</span><span><b>Cluster</b> CIAI</span>
+    <span><b>Intervals</b> paired user bootstrap, 95%, 2,000 draws; exclude training-seed variance</span></div>
+</header>
+
+<div class="tiles">@@tiles@@</div>
+
+<div class="summary">
+  <div class="lead">
+    <p><b>Recency.</b> Replacing the user's most recent item costs the correct first SID digit about half a nat in both
+      paradigms: @@first_rqk@@ and @@first_rqvae@@ nats for the AR models, and @@dm_rqk@@ and @@dm_rqvae@@ for DiffGRM. The
+      AR model's top first digit changes in @@flip_rqk@@% and @@flip_rqvae@@% of rows.</p>
+    <p><b>Copying.</b> Later digits are copied from whichever history item already shares the prefix generated so far.
+      We call this prefix-matched copying. The AR models read that item's next-digit token directly, through attention
+      in layers 14 to 27, spread over many heads. DiffGRM spreads the item through its encoder into the other history
+      slots and reads it there.</p>
+    <p><b>Effect on recommendations.</b> @@decode_summary@@</p>
+    <p><b>Time.</b> @@lead_time@@</p>
+    <p><b>Features.</b> @@lead_sae@@</p>
+  </div>
+  <nav class="toc" aria-label="Sections">
+    <div class="eyebrow">Contents</div>
+    <a href="#s1"><span>1</span>What was run</a>
+    <a href="#s2"><span>2</span>The most recent item</a>
+    <a href="#s3"><span>3</span>How the AR models copy</a>
+    <a href="#s4"><span>4</span>Does copying help recommendations?</a>
+    <a href="#s5"><span>5</span>Next-two recommendation</a>
+    <a href="#s6"><span>6</span>How DiffGRM copies</a>
+    <a href="#s7"><span>7</span>AR and DiffGRM side by side</a>
+    <a href="#s8"><span>8</span>What we learned about the evaluation</a>
+    <a href="#s9"><span>9</span>Time: what "recent" means</a>
+    <a href="#s10"><span>10</span>Features inside the AR models</a>
+    <a href="#s11"><span>11</span>How far to trust the numbers</a>
+    <a href="#s12"><span>12</span>Limits and next experiments</a>
+    <a href="#s13"><span>13</span>Where the results live</a>
+  </nav>
+</div>
+
+<section id="s1">
+  <div class="head"><div class="sno">1 · Setup</div><h2>What was run</h2></div>
+  <p>Every experiment follows the same pattern. First, a protocol states the question, conditions, estimands and
+    expectations before any outcome exists. Next come controls that must reproduce the unintervened model bit for bit.
+    Last, a paired bootstrap over users gives the intervals. Effects are reported as Δ = score(clean) − score(intervened)
+    in nats, so a positive Δ means the intervention hurt the correct answer. Scores are the correct code's log-probability
+    among that digit's codes, taken where the model predicts the digit. exp6 is the exception: it measures hit rate in real
+    beam-search decoding.</p>
+  <div class="prose-table"><table>
+    <thead><tr><th>Experiment</th><th>Question</th><th>Model and data</th><th>Expectations</th></tr></thead>
+    <tbody>
+      <tr><td><b>exp3</b></td><td>Which past items move each output digit, and where in the network does that evidence travel?</td><td>AR · test, 3,681 rows</td><td>@@v_exp3@@</td></tr>
+      <tr><td><b>exp4</b></td><td>Is prefix-matched copying real, which attention link carries it, and in which heads?</td><td>AR · valid, 3,680 rows (confirmatory)</td><td>@@v_exp4@@</td></tr>
+      <tr><td><b>Probes</b></td><td>When do the answer positions carry the target's digit, and when the recent item's?</td><td>AR · 22 GB of activations</td><td>@@v_rep@@</td></tr>
+      <tr><td><b>exp6</b></td><td>Does copying help or hurt top-10 recommendations, for repeat vs new targets?</td><td>AR · archived beam decoder</td><td>@@v_exp6@@</td></tr>
+      <tr><td><b>exp5</b></td><td>Is the second of two recommended items computed from the first?</td><td>AR next-two · 3,452 rows</td><td>@@v_exp5@@</td></tr>
+      <tr><td><b>exp7</b></td><td>Does DiffGRM show the same history use and copying, through the same link?</td><td>DiffGRM · 6,297 users</td><td>@@v_exp7@@</td></tr>
+      <tr><td><b>exp8</b></td><td>Which route carries DiffGRM's copy: the encoder spread or the direct decoder read?</td><td>DiffGRM · 6,297 users</td><td>@@v_exp8@@</td></tr>
+      <tr><td><b>Time audit</b></td><td>What does "recent" mean in the data, and do the models' copying and its benefit follow it? (retrospective exp6)</td><td>both paradigms · CPU re-read of exp3, exp4, exp6, exp7</td><td>@@v_time@@</td></tr>
+      <tr><td><b>exp9</b></td><td>Does the AR copy follow the item's position or its time? Swap the two most recent items.</td><td>AR · test (primary) and valid</td><td>@@v_exp9@@</td></tr>
+      <tr><td><b>SAEs</b></td><td>Which features carry the copy and the prefix match, and is anything else about the target there? (representation exp2)</td><td>AR · SAEs at layers 12–24</td><td>@@v_sae@@</td></tr>
+    </tbody></table></div>
+  <p class="expts">Models: Qwen2.5-1.5B SFT (<code>next-item_best</code>, RQ-KMeans 3×128; <code>oneoff_rqvae4cb128</code>,
+    RQ-VAE 4×128; <code>two-item_best</code>, MQ 4×256). DiffGRM with 1 encoder and 4 decoder layers on the same two
+    SID tables. The AR and DiffGRM cohorts differ and are compared side by side, never joined.</p>
+</section>
+
+<section id="s2">
+  <div class="head"><div class="sno">2 · Recency · exp3, exp7</div><h2>The most recent item carries the first digit</h2></div>
+  <p>Replacing the most recent item with a catalogue item that has a different first digit costs the correct first digit
+    about half a nat. The second most recent item matters a quarter to a half as much, and items further back barely matter.
+    Keeping the replacement's first digit removes most of the effect: @@keep_ar_rqk@@% and @@keep_ar_rqvae@@% of it for the AR models,
+    @@keep_d_rqk@@% and @@keep_d_rqvae@@% for DiffGRM. That first digit is where the evidence sits.</p>
+  @@f_recency@@
+</section>
+
+<section id="s3">
+  <div class="head"><div class="sno">3 · Mechanism, AR · exp3, exp4, probes</div><h2>How the AR models copy</h2></div>
+  <p>Patching shows where the evidence lives. It stays on the replaced item's own tokens until about layer 20. Then, over
+    layers 19 to 24, it moves to the position that predicts the first digit. Later digits follow the same path to the
+    target tokens.</p>
+  @@f_patching@@
+  <p>An unexpected pattern in exp3 became the hypothesis for exp4. Changing a history item's later digits hurt the
+    matching output digit, but only when that item already shared the prefix generated so far. exp4 tested this on the
+    valid split, which played no part in forming the hypothesis. The pattern replicated. Blocking a single attention link,
+    from the position that predicts digit d to digit d of the matching item, removes about a third of the effect. The same
+    link aimed at a non-matching item does nothing. The read happens only in layers 14 to 27.</p>
+  @@f_copy@@
+  @@f_heads@@
+  <p>The captured activations show the same thing from the inside. The model's own first-digit choice is the recent
+    item's first digit in most rows, and that preference switches on late. Nothing a linear probe can read at that
+    position predicts the correct first digit better than copying does.</p>
+  @@f_lens@@
+</section>
+
+<section id="s4">
+  <div class="head"><div class="sno">4 · Recommendation quality · exp6</div><h2>Does copying help recommendations?</h2></div>
+  <p>This experiment asks the question that matters for the paper. It re-runs the archived AR decoder (trie-constrained,
+    50 beams, reproduced batch for batch) with the copy reads blocked in layers 14 to 27. At each decoding step, each beam
+    loses its reads of digit d from history items that match that beam's own prefix; for the first digit, reads of every
+    history item. Targets are split by whether their SID already appears in the user's history (repeat,
+    @@nrep@@ rows, @@nrep_pct@@%) or not (new).</p>
+  @@decode_text@@
+  @@f_decode@@
+  <p>@@decode_takeaway@@</p>
+</section>
+
+<section id="s5">
+  <div class="head"><div class="sno">5 · Next-two · exp5</div><h2>The second item is built from the first</h2></div>
+  <p>In the next-two model, the second recommended item depends on the first much more than on the user's most recent
+    item. It reuses the same prefix-matched copying: when item 1 already shares item 2's first digits, changing item 1's
+    later digits costs item 2 0.43 to 0.73 nats, and about zero otherwise. Item 1's information reaches item 2 in the
+    same late window, layers 20 to 26.</p>
+  @@f_next2@@
+</section>
+
+<section id="s6">
+  <div class="head"><div class="sno">6 · Mechanism, DiffGRM · exp7, exp8</div><h2>DiffGRM copies too, through its encoder</h2></div>
+  <p>DiffGRM shows the same prefix-matched copying. But blocking cross-attention from the digit position to the matching
+    item's slot changes nothing, in any decoder block, from any digit. DiffGRM encodes each history item as one token, and
+    its single encoder layer mixes the items. So exp8 blocked the encoder route as well: no other history slot may read
+    the item. The encoder route alone carries much of the copy. With both routes blocked, about two thirds of it is
+    gone. The direct read is a backup, and it only matters once the spread is blocked.</p>
+  @@f_diff@@
+</section>
+
+<section id="s7">
+  <div class="head"><div class="sno">7 · Comparison</div><h2>AR and DiffGRM side by side</h2></div>
+  <div class="prose-table"><table>
+    <thead><tr><th></th><th>Qwen AR</th><th>DiffGRM</th></tr></thead>
+    <tbody>
+      <tr><td>First-digit reliance on the most recent item</td><td class="n">@@first_rqk@@ / @@first_rqvae@@ nats</td><td class="n">@@dm_rqk@@ / @@dm_rqvae@@ nats</td></tr>
+      <tr><td>Prefix-matched copying (matching vs non-matching item)</td><td>1.35 / 1.06 vs ≈ 0</td><td>0.35 / 0.96 vs ≈ 0</td></tr>
+      <tr><td>How a history item is represented</td><td>one token per SID digit</td><td>one token per item</td></tr>
+      <tr><td>Route of the copy</td><td>direct attention from the prediction position to the item's digit token, layers 14–27, many heads</td><td>the encoder spreads the item into other slots and the decoder reads them there; the direct read is a backup</td></tr>
+      <tr><td>Where the evidence reaches the answer</td><td>layers 19–24 of 28</td><td>no single decoder block matters</td></tr>
+    </tbody></table></div>
+  <p class="expts">Values are RQ-KMeans / RQ-VAE. The cohorts, history lengths (≤ 10 vs ≤ 50 items) and model sizes differ, so this comparison is descriptive.</p>
+</section>
+
+<section id="s8">
+  <div class="head"><div class="sno">8 · Evaluation audit</div><h2>What we learned about the evaluation</h2></div>
+  <p>Reproducing the archived AR predictions exposed four things about how the reported numbers were produced.</p>
+  <div class="audit">
+    <div class="tile"><div class="tv">18.9% <span class="sep">/</span> 15.0%</div><div class="tl">of archived AR list entries are not catalogue SIDs</div><div class="ts">RQ-KMeans / RQ-VAE · 3,681 × 50 entries</div></div>
+    <div class="tile"><div class="tv">7.6% <span class="sep">/</span> 0.7%</div><div class="tl">of rows have such an entry inside the top 10</div><div class="ts">lowers the reported HR@10</div></div>
+    <div class="tile"><div class="tv">about 80%</div><div class="tl">of the 50 beams are filler after the first step</div><div class="ts">beam rows without a valid SID prefix, exp6</div></div>
+  </div>
+  <ul class="plain">
+    <li><b>The archived AR decoder was beam sampling.</b> <code>evaluate.py</code> passes a GenerationConfig without
+      sampling settings, so transformers 4.57.1 merges the checkpoint's Qwen-Instruct defaults into it: sampling on,
+      temperature 0.7, top-k 20, top-p 0.8, repetition penalty 1.1. The sweep ran on that version. Each beam is cut to a
+      small nucleus, and the repetition penalty works against copying history tokens. The archive reproduces exactly under
+      these settings (@@v1_rows@@). @@plain_sentence@@</li>
+    <li><b>Turning the sampling off takes more than setting it.</b> From transformers 4.50, <code>generate()</code> refills
+      every field left at its library default from the checkpoint's <code>generation_config.json</code>.
+      <code>do_sample=False</code> and <code>repetition_penalty=1.0</code> are those defaults, so passing them changes
+      nothing; only <code>use_model_defaults=False</code> gives plain beam search. exp6's first plain-decoder run fell
+      into this trap and was re-run (protocol amendment 2).</li>
+    <li><b>The frozen RQ-VAE AR checkpoint is not the archived model.</b> <code>oneoff_rqvae4cb128</code> reproduces 0 of 3,681
+      archived RQ-VAE lists, and its HR@10 under the archive's own rule is 14.5% against the recorded 13.1%. It comes from an earlier training run with the same configuration, so RQ-VAE AR results
+      describe the one-off.</li>
+    <li><b>The prompt wording changed upstream.</b> OneDiffRec commit <code>a165f65</code> (2026-09-13) stripped trailing
+      spaces from the prompt templates, which changes the token ids. The frozen checkpoints predate it, and SidLens
+      rebuilds their exact prompts. Any checkpoint trained after that date needs the new wording.</li>
+    <li><b>Duplicate review records inflate HR@10.</b> Some reviews appear twice in the dataset, as the same item on the same
+      day. When one copy is the target, the model only has to copy the other. These rows are a few percent of each split but a
+      sixth of the RQ-VAE model's hits (section 9).</li>
+  </ul>
+</section>
+
+@@sec_time@@
+
+@@sec_sae@@
+
+<section id="s11">
+  <div class="head"><div class="sno">11 · Validation</div><h2>How far to trust the numbers</h2></div>
+  <div class="prose-table"><table>
+    <thead><tr><th>Check</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Frozen weights are the upstream models</td><td>sha256 matches for all three AR checkpoints; DiffGRM hashes match the registry</td></tr>
+      <tr><td>Inputs are what the models saw</td><td>prompt ids equal upstream's dataset classes row for row; rows equal the archive (3,681 / 3,681) and the SID tables</td></tr>
+      <tr><td>AR patch controls (exp3, exp5)</td><td>44,172 + 41,424 controls bit-exact: no-op, full restore, self-patch</td></tr>
+      <tr><td>AR knockout controls (exp4)</td><td>14,722 no-op knockouts bit-exact across both splits</td></tr>
+      <tr><td>Knockout inside <code>generate()</code> (exp6)</td><td>an empty knockout plan is bit-identical to unhooked <code>generate()</code> (sequences and scores); the hooked baseline reproduces the archive (@@v1_rows@@)</td></tr>
+      <tr><td>DiffGRM (exp7, exp8)</td><td>no-op cross-attention and encoder masks bit-exact; 119,643 batch-invariance comparisons exact; decoder-path checks from exp1 pass</td></tr>
+      <tr><td>Probe pipeline</td><td>reproduces the model's own output ranks (99.95% / 99.99% at bf16)</td></tr>
+      <tr><td>Timestamps (section 9)</td><td>all 43,102 events aligned to a review day; the 72 positions with an ambiguous duplicate day are resolved by the global split order, never guessed; every AR row and DiffGRM user joins exactly once</td></tr>
+      <tr><td>Order swap (exp9)</td><td>1,211 swaps of two items with identical SIDs are bit-exact on both splits; the beam-search arm reproduces exp6's plain-decoder lists for 3,680 of 3,681 rows</td></tr>
+      <tr><td>SAE ablations (section 10)</td><td>1,024 self-patch controls bit-exact; spliced-in reconstructions keep ≥ 97% of what mean-ablation destroys</td></tr>
+      <tr><td>Tests</td><td>290 CPU tests pass. The 11 skipped need Industrial labels, which are not on this cluster.</td></tr>
+    </tbody></table></div>
+</section>
+
+<section id="s12">
+  <div class="head"><div class="sno">12 · Limits</div><h2>Limits and next experiments</h2></div>
+  <ul class="plain">
+    <li><b>Scores.</b> Teacher-forced (AR) and fixed-state (DiffGRM) scores are conditional log-probabilities. Only exp6 measures hit rate.</li>
+    <li><b>Training seeds.</b> Each checkpoint was trained once, so the intervals are conditional on these weights.</li>
+    <li><b>Controls.</b> Replacement items are uniform catalogue items, not category-matched, because category labels are not on this cluster.</li>
+    <li><b>Knockouts.</b> A knockout removes direct reads; indirect routes are bounded (exp4, exp8), not eliminated.</li>
+    <li><b>Post-hoc hypothesis.</b> Prefix-matched copying was found after the fact in exp3, then confirmed on a held-out split (exp4) and in the other model family (exp7). exp8 was designed after seeing exp7.</li>
+    <li><b>Split sizes.</b> AR effects on the valid split are 1.5 to 1.65 times the test-split ones. About half of that is the
+      periods' mix of duplicate-record and same-day rows (section 9); the rest is unexplained.</li>
+    <li><b>Time.</b> Review days are not purchase days, and the time strata also differ in content (same-day items are often
+      bundles). exp9 controls order; the rest of section 9 is associational.</li>
+  </ul>
+  <div class="callout"><h3>Next experiments</h3>
+    <ul class="plain">
+      <li>DiffGRM decoding: does copying help or hurt its hit rate? This is exp6 for DiffGRM, blocking both routes inside the validated beam search.</li>
+      <li>Where the prefix match is computed: section 10 rules out a readout feature for RQ-KMeans. Next is the attention query–key match itself in layers 14 to 27, with SAEs on attention inputs.</li>
+      <li>Whether the burst signal can steer copying: push the readout along the same-day direction and see whether the copy responds.</li>
+      <li>Report HR with duplicate-record targets excluded or flagged, for the paper's AR and DiffGRM numbers.</li>
+      <li>Category-matched controls and category probes, once the Industrial labels are pulled onto this cluster.</li>
+      <li>A plain-beam re-evaluation of the AR sweep numbers for the paper.</li>
+    </ul></div>
+</section>
+
+<section id="s13">
+  <div class="head"><div class="sno">13 · Provenance</div><h2>Where the results live</h2></div>
+  <div class="prose-table"><table>
+    <thead><tr><th>Experiment</th><th>Code (repository)</th><th>Summary (under <code>$SIDLENS_WORK/derived/</code>)</th></tr></thead>
+    <tbody>
+      <tr><td>exp3</td><td><code>experiments/controlled/exp3_ar_history_patching/</code></td><td><code>controlled/exp3_ar_history_patching/summary-280961/</code></td></tr>
+      <tr><td>exp4</td><td><code>experiments/controlled/exp4_ar_copy_circuit/</code></td><td><code>summary-281261/</code> (valid), <code>summary-281394/</code> (test)</td></tr>
+      <tr><td>Probes</td><td><code>experiments/representation/exp1_ar_digit_decoding/</code></td><td><code>representation/exp1_ar_digit_decoding/summary-281264-281411/</code></td></tr>
+      <tr><td>exp6</td><td><code>experiments/controlled/exp6_ar_copy_in_decoding/</code></td><td><code>controlled/exp6_ar_copy_in_decoding/@@exp6_dir@@/</code>@@exp6_plain_dir@@</td></tr>
+      <tr><td>exp5</td><td><code>experiments/controlled/exp5_ar_next_two_conditioning/</code></td><td><code>controlled/exp5_ar_next_two_conditioning/summary-281263/</code></td></tr>
+      <tr><td>exp7</td><td><code>experiments/controlled/exp7_diffusion_history_use/</code></td><td><code>controlled/exp7_diffusion_history_use/summary-283124-r2/</code></td></tr>
+      <tr><td>exp8</td><td><code>experiments/controlled/exp8_diffusion_copy_route/</code></td><td><code>controlled/exp8_diffusion_copy_route/summary-283159/</code></td></tr>
+      <tr><td>Time audit</td><td><code>experiments/retrospective/exp6_time_structure/</code></td><td><code>retrospective/exp6_time_structure/287189/result/</code></td></tr>
+      <tr><td>exp9</td><td><code>experiments/controlled/exp9_ar_order_vs_time/</code></td><td><code>controlled/exp9_ar_order_vs_time/summary-287182/</code> (test), <code>summary-287183/</code> (valid)</td></tr>
+      <tr><td>SAEs</td><td><code>experiments/representation/exp2_ar_sae/</code></td><td><code>representation/exp2_ar_sae/summary-287222-287231/</code>, <code>summary-a1-287380-287415/</code> (amendment A1)</td></tr>
+      <tr><td>Activations</td><td><code>scripts/activations/ar_capture.*</code></td><td><code>ar_capture/281053</code>, <code>281054</code>, <code>281055</code> (test); <code>287160</code>, <code>287161</code> (train, for the SAEs)</td></tr>
+    </tbody></table></div>
+  <p class="expts">Each experiment folder holds its protocol, runner, summarizer, README and RESULTS. Shared code:
+    <code>src/sidlens/interventions/</code>, <code>src/sidlens/analysis/bootstrap.py</code>, <code>src/sidlens/data/timestamps.py</code> and
+    <code>src/sidlens/sae/topk.py</code>. This page is built by
+    <code>docs/results/interventions/build_report.py</code> from the summaries above.</p>
+</section>
+
+<footer>SidLens · built @@built@@ from the experiment summaries. All intervals are 95% paired user-bootstrap intervals and exclude training-seed variance.</footer>
+</div>
+<div id="tip" hidden></div>
+<script>
+(function () {
+  var tip = document.getElementById("tip");
+  function show(el, x, y) {
+    var t = el.getAttribute("data-tip");
+    if (!t) return;
+    while (tip.firstChild) tip.removeChild(tip.firstChild);
+    t.split("\n").forEach(function (line, i) {
+      var d = document.createElement("div");
+      d.className = i === 0 ? "v" : "l";
+      d.textContent = line;
+      tip.appendChild(d);
+    });
+    tip.hidden = false;
+    var r = tip.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+    var left = Math.min(x + 14, vw - r.width - 8), top = y + 14;
+    if (top + r.height > vh - 8) top = y - r.height - 12;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  }
+  function hide() { tip.hidden = true; }
+  document.addEventListener("pointermove", function (e) {
+    var el = e.target.closest ? e.target.closest("[data-tip]") : null;
+    if (el) show(el, e.clientX, e.clientY); else hide();
+  });
+  document.addEventListener("focusin", function (e) {
+    var el = e.target.closest ? e.target.closest("[data-tip]") : null;
+    if (!el) return;
+    var r = el.getBoundingClientRect();
+    show(el, r.left + r.width / 2, r.top + r.height / 2);
+  });
+  document.addEventListener("focusout", hide);
+  document.addEventListener("scroll", hide, { passive: true });
+})();
+</script>

@@ -13,6 +13,16 @@ described in the project README.
 4. Next-two conditional-association audit (the planned dependence audit).
 5. Diffusion confidence and digit-commitment trajectories (deferred until the
    retained-output analyses above are reviewed).
+6. `exp6_time_structure/` (added 2026-09-30): time in the data (same-day
+   bursts, ASIN tie order, duplicate records) and the exp3/exp4/exp6/exp7
+   outputs split by review day. It has its own wrapper,
+   `scripts/retrospective/time_structure.sbatch`, and writes a new job
+   directory, unlike the fixed-directory sprint wrapper.
+7. `exp7_collision_credit/` (added 2026-10-03): the exp6 copy-knockout
+   predictions re-scored at item level (CCE) and split by target–history
+   relation: same item, same-SID partner, near-duplicate variant, or new.
+   It has its own wrapper, `scripts/retrospective/collision_credit.sbatch`,
+   and writes a new job directory.
 
 Experiments 1–4 consume frozen, retained outputs and are CPU-only.  Submit them
 as a durable array pinned to the requested node:
