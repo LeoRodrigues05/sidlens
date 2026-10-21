@@ -391,7 +391,10 @@ def _ctx(spec: Spec, ckpt: str | None, pilot=False) -> Ctx:
     from sidlens.grid import registry
     entry = registry.load().entry(ckpt) if ckpt else {}
     out = cell_dir(spec, ckpt, pilot)
-    scratch = paths.SCRATCH / spec.name / (grid.map_dir(ckpt) if ckpt else "single")
+    # a pilot cell may run beside the real cell of the same map, and the AR chain
+    # starts by deleting its scratch folder: the two must never share one
+    scratch = (paths.SCRATCH / "pilot" if pilot else paths.SCRATCH) / spec.name / (
+        grid.map_dir(ckpt) if ckpt else "single")
     return Ctx(ckpt or "", entry, grid.split_name(ckpt)[1] if ckpt else grid.BEST, out, scratch, pilot)
 
 
