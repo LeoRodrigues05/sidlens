@@ -1,5 +1,14 @@
 #!/usr/bin/env python
-"""New matched-beam inference on one frozen next-item DiffGRM checkpoint."""
+"""New matched-beam inference on one frozen next-item DiffGRM checkpoint (or one grid weight state).
+
+Grid states (`--ckpt grid:<key>@<state>`): the same policies on the run's own
+cohort and model (`sidlens.grid.diff_setup`), plus `grid_l2r`, the run's own
+test decoder (`grid.decode_diff`: left to right, catalog-legal codes at every
+step), so each policy is also compared with the search that produced the saved
+lists. There is no archive to reconstruct; `diff_setup.check` (the run's saved
+lists on the evaluator's first 64 users, and the scorer check) replaces it.
+Summaries: `summarize_grid.py`.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +32,7 @@ from sidlens.registry.diffusion import load_runtime
 
 
 POLICIES = ("confidence", "fixed", "legacy_confidence")
+GRID_POLICIES = POLICIES + ("grid_l2r",)
 CUTOFFS = (1, 3, 5, 10)
 METRICS = tuple(
     f"{metric}@{cutoff}"
@@ -71,7 +81,8 @@ def configure_precision():
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cell-index", type=int, required=True)
+    parser.add_argument("--cell-index", type=int)
+    parser.add_argument("--ckpt", help="a next-item DiffGRM grid weight state (grid:<key>@<state>) instead")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--beam-widths", type=int, nargs="+", default=[64, 256])
     parser.add_argument("--limit", type=int, default=0,
@@ -84,7 +95,9 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if not 0 <= args.cell_index < 18:
+    if (args.cell_index is None) == (args.ckpt is None):
+        raise ValueError("give exactly one of --cell-index or --ckpt")
+    if args.ckpt is None and not 0 <= args.cell_index < 18:
         raise ValueError("cell-index must be 0..17")
     if args.limit < 0 or args.batch_size <= 0 or args.decoder_chunk_size <= 0:
         raise ValueError("invalid row or batch limits")
@@ -96,22 +109,36 @@ def main():
         raise RuntimeError("GPU inference must run in an sbatch GPU allocation")
     configure_precision()
     started = time.perf_counter()
-    registry = load_runtime()
-    ckpt_id = cell_ids()[args.cell_index]
-    entry = registry[ckpt_id]
+    grid_setup, policies = None, POLICIES
+    if args.ckpt:
+        from sidlens.grid import decode_diff as DD, diff_setup as DS
+        grid_setup = DS.load(args.ckpt, device="cuda")
+        ckpt_id, entry, cohort = args.ckpt, grid_setup.compat, grid_setup.cohort
+        model, model_report = grid_setup.model, grid_setup.report
+        policies = GRID_POLICIES
+    else:
+        registry = load_runtime()
+        ckpt_id = cell_ids()[args.cell_index]
+        entry = registry[ckpt_id]
+        cohort = load_eval_cohort(entry)
     if entry["status"] != "trained" or entry["task"] != "next1":
         raise ValueError(f"not a trained next-item checkpoint: {ckpt_id}")
     if sha256_file(Path(entry["ckpt_path"])) != entry["ckpt_sha256"]:
         raise ValueError("checkpoint hash drift")
-    cohort = load_eval_cohort(entry)
     n = min(args.limit, len(cohort)) if args.limit else len(cohort)
     depth = entry["config"]["n_digit"]
     order = torch.randperm(depth, generator=torch.Generator().manual_seed(42)).tolist()
-    model, model_report = diffusion.load(entry, device="cuda")
+    if grid_setup is None:
+        model, model_report = diffusion.load(entry, device="cuda")
     print(f"[load] {ckpt_id} users={n}/{len(cohort)} fixed_order={order} "
           f"GPU={torch.cuda.get_device_name(0)}", flush=True)
     validation = None
-    if args.validate:
+    if grid_setup is not None:
+        validation = DS.check(grid_setup, device="cuda")
+        print(f"[validation] {json.dumps(validation, default=str)[:600]}", flush=True)
+        if not validation["ok"]:
+            raise RuntimeError("grid checks failed")
+    elif args.validate:
         from validate import verify_model_and_decoder
         count = min(8, n)
         validation = verify_model_and_decoder(
@@ -136,7 +163,7 @@ def main():
             )
             encoder.append(enc.cpu())
     encoder = torch.cat(encoder, dim=0)
-    conditions = [(beam, policy) for beam in args.beam_widths for policy in POLICIES]
+    conditions = [(beam, policy) for beam in args.beam_widths for policy in policies]
     shape = (len(conditions), n)
     predictions = np.full((*shape, 10, depth), -1, dtype=np.int64)
     scores = np.full((*shape, 10), -np.inf, dtype=np.float32)
@@ -156,7 +183,12 @@ def main():
         for offset in range(0, n, args.batch_size):
             end = min(offset + args.batch_size, n)
             with torch.inference_mode():
-                if policy == "legacy_confidence":
+                if policy == "grid_l2r":
+                    hyps = DD.decode(model, None, grid_setup.catalog, beam_size=beam, top_k=10,
+                                     encoded=encoder[offset:end].to("cuda"))
+                    codes_, scores_, counts_ = DS.as_arrays(hyps, depth)
+                    decoded = None
+                elif policy == "legacy_confidence":
                     from legacy import decode_legacy_confidence
                     decoded = decode_legacy_confidence(
                         model, encoder[offset:end].to("cuda"), beam_width=beam,
@@ -169,11 +201,14 @@ def main():
                         top_k=10, allowed_sids=cohort.sid_buckets,
                         decoder_chunk_size=args.decoder_chunk_size,
                     )
-            pred = decoded.codes.cpu().numpy()
-            size = decoded.counts.cpu().numpy()
+            if decoded is None:                                  # grid_l2r
+                pred, size = codes_, counts_
+            else:
+                pred = decoded.codes.cpu().numpy()
+                size = decoded.counts.cpu().numpy()
             predictions[condition_index, offset:end] = pred
             if scores_available:
-                scores[condition_index, offset:end] = decoded.scores.cpu().numpy()
+                scores[condition_index, offset:end] = scores_ if decoded is None else decoded.scores.cpu().numpy()
             counts[condition_index, offset:end] = size
             for index in range(end - offset):
                 row = offset + index
@@ -183,7 +218,7 @@ def main():
                 )
                 ranks[condition_index, row] = rank or 0
                 values[condition_index, row] = [metrics[name] for name in METRICS]
-            if scores_available:
+            if scores_available and decoded is not None:
                 generated += int(decoded.generated_counts.sum().item())
                 unique += int(decoded.unique_counts.sum().item())
                 invalid += int(decoded.invalid_counts.sum().item())
@@ -219,7 +254,7 @@ def main():
         ("historical_confidence256_reconstruction", (256, "legacy_confidence"), ""),
     ):
         reconstruction = {}
-        if condition not in conditions:
+        if condition not in conditions or grid_setup is not None:     # no archived metrics for grid runs
             historical[key] = reconstruction
             continue
         idx = conditions.index(condition)
@@ -235,7 +270,9 @@ def main():
         historical[key] = reconstruction
     result = {
         "experiment": "controlled-exp1-matched-beam", "checkpoint": ckpt_id,
-        "cell_index": args.cell_index, "category": "Industrial_and_Scientific",
+        "cell_index": args.cell_index,
+        "category": grid_setup.entry["category"] if grid_setup else "Industrial_and_Scientific",
+        **({k: entry[k] for k in ("grid_key", "grid_state", "dataset")} if grid_setup else {}),
         "snapshot": (paths.MANIFESTS / "CURRENT").read_text().strip(),
         "quantizer": entry["quantizer"], "depth": depth,
         "codebook_size": entry["codebook_size"], "n_users": n,

@@ -1,0 +1,332 @@
+<title>OneDiffRec Grid Run Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column (~70ch) with full-width tables and charts that scroll inside their own boxes. */
+:root {
+  --bg: #f7f8f7; --panel: #ffffff; --fg: #1d2421; --muted: #5b6863; --rule: #d8dfdb;
+  --accent: #1f6f63; --accent-soft: #e1efeb; --gpu: #1f6f63; --gpu-b: #c98a2b; --cpu: #6a7fb0;
+  --ok: #2c7a4b; --warn: #a86a12; --pend: #6b7280;
+  --display: "Newsreader", Georgia, serif;
+  --body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121715; --panel: #1a211e; --fg: #e3ebe7; --muted: #9db0a8; --rule: #2e3834;
+  --accent: #5cc0ad; --accent-soft: #1f322d; --gpu: #5cc0ad; --gpu-b: #e0a650; --cpu: #93a8db;
+  --ok: #6fcf97; --warn: #e0a650; --pend: #9aa3ad; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121715; --panel: #1a211e; --fg: #e3ebe7; --muted: #9db0a8; --rule: #2e3834;
+  --accent: #5cc0ad; --accent-soft: #1f322d; --gpu: #5cc0ad; --gpu-b: #e0a650; --cpu: #93a8db;
+  --ok: #6fcf97; --warn: #e0a650; --pend: #9aa3ad; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-block: 40px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: 2.3rem; }
+h2 { font-size: 1.6rem; margin-top: 56px; padding-top: 14px; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.15rem; }
+p, li { max-width: 72ch; }
+p { margin: 10px 0; }
+.lede { color: var(--muted); font-size: 1.05rem; }
+.meta { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+.num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 0.85rem; white-space: nowrap; }
+.label { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.72rem; color: var(--muted); font-weight: 700; }
+.figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 22px; }
+.fig { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+.fig b { display: block; font-family: var(--display); font-size: 1.6rem; font-weight: 600; }
+.scroll { overflow-x: auto; margin-top: 14px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+td.r, th.r { text-align: right; }
+tr.group td { background: var(--accent-soft); font-weight: 700; color: var(--fg); }
+tr.total td { font-weight: 700; border-top: 2px solid var(--fg); }
+.exp { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; margin-top: 14px; display: grid; gap: 6px; }
+.exp header { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+.exp .tag { font-family: var(--mono); font-size: 0.75rem; color: var(--accent); }
+.exp dl { display: grid; grid-template-columns: 7.5rem 1fr; gap: 4px 12px; margin: 4px 0 0; }
+.exp dt { color: var(--muted); font-size: 0.8rem; padding-top: 2px; }
+.exp dd { margin: 0; min-width: 0; }
+@media (max-width: 560px) { .exp dl { grid-template-columns: 1fr; } .exp dt { padding-top: 6px; } }
+.pill { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.ok { color: var(--ok); } .warn { color: var(--warn); } .pend { color: var(--pend); }
+.note { border-left: 3px solid var(--warn); padding: 8px 14px; background: var(--panel); margin-top: 14px; }
+svg text { fill: var(--fg); font-family: var(--body); font-size: 11px; }
+svg .ax { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.82rem; color: var(--muted); margin-top: 6px; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="label">sidlens · OneDiffRec grid-v1</div>
+  <h1>OneDiffRec Grid Run Plan</h1>
+  <p class="lede">What sidlens will run on the coauthor's finished grid, what each experiment does, how it is checked, and how long it should take.</p>
+  <div class="meta">Draft of 2026-10-21 · code uncommitted in <span class="mono">/nfs-stor/leo.rodrigues/sidlens</span> · plan: <span class="mono">docs/plans/COPYING_GRID_PLAN.md</span> · runbook: <span class="mono">docs/clusters/GRID_RUNBOOK.md</span></div>
+  <div class="figs">
+    <div class="fig"><span class="label">Grid runs</span><b class="num">372</b>93 maps × 2 tasks × 2 paradigms</div>
+    <div class="fig"><span class="label">Experiments</span><b class="num">27</b>23 earlier ones ported, 4 new</div>
+    <div class="fig"><span class="label">GPU-hours, plan rates</span><b class="num">≈1,520</b>full set (best state: ≈1,440)</div>
+    <div class="fig"><span class="label">GPU-hours, slow decoding</span><b class="num">≈3,910</b>if AR decoding runs one row at a time (see Time)</div>
+  </div>
+</header>
+
+<h2 id="grid">The grid</h2>
+<p>Each run trains one model on one SID map and evaluates it once on the test cohort. sidlens reads the runs in place and writes nothing into the OneDiffRec work root.</p>
+<div class="scroll"><table>
+<thead><tr><th>Catalog</th><th class="r">Native maps</th><th class="r">ZCR twins</th><th class="r">Maps</th><th>Runs per map</th><th>Test users</th></tr></thead>
+<tbody>
+<tr><td>Industrial_and_Scientific</td><td class="r num">27</td><td class="r num">21</td><td class="r num">48</td><td>AR and DiffGRM × next-item and next-two</td><td>all 6,297</td></tr>
+<tr><td>Office</td><td class="r num">27</td><td class="r num">18</td><td class="r num">45</td><td>AR and DiffGRM × next-item and next-two</td><td>sample of 6,297 for model runs; all for saved-list analyses</td></tr>
+</tbody></table></div>
+<p>Models: Qwen2.5-1.5B SFT for AR (28 layers), DiffGRM (1 encoder and 4 decoder layers, width 256) for diffusion. Weight states: every run's best checkpoint; AR runs also keep epochs 0.5 and 1.5 (186 next-item states), and DiffGRM runs keep per-epoch snapshots (about 190 next-item states).</p>
+<p>Two scripts start everything. <code>run_best_state.sh</code> runs every experiment on every map at the best state. <code>run_full.sh</code> adds a cheap set at every intermediate state: AR exp3 Part A and exp4 Part R (test split), and DiffGRM exp7. Results land in <code>results_remote/&lt;group&gt;/&lt;experiment&gt;/&lt;dataset&gt;/&lt;task&gt;/&lt;paradigm&gt;/&lt;map&gt;/&lt;state&gt;/</code>.</p>
+
+<h2 id="checks">Checks before a result counts</h2>
+<p>Every cell runs these checks first and stops if one fails. A stopped cell is marked failed and rerun into a new folder; nothing is overwritten.</p>
+<div class="scroll"><table>
+<thead><tr><th>Check</th><th>What it compares</th><th>Applies to</th></tr></thead>
+<tbody>
+<tr><td><b>V1 inputs</b></td><td>Rows, SID table and vocabulary are the run's own; prompts equal OneDiffRec's prompt code token for token (200 rows); every input file matches the run's recorded hash.</td><td>every AR cell</td></tr>
+<tr><td><b>V2a decoder</b></td><td>Our decoder reproduces the run's saved test lists: same SIDs in the same order, scores within 1e-4 (ties may swap within 1e-4). AR: first 512 rows. DiffGRM: the evaluator's first 64 users.</td><td>every decoding experiment; every DiffGRM cell</td></tr>
+<tr><td><b>Scorer</b></td><td>The DiffGRM state scorer used by the intervention code gives the same log-probabilities as the evaluator's per-digit forward.</td><td>every DiffGRM cell</td></tr>
+<tr><td><b>V3 no-ops</b></td><td>Interventions that should change nothing (empty knockouts, self-patches, α = 1) give bit-identical outputs.</td><td>every intervention experiment (GPU)</td></tr>
+</tbody></table></div>
+
+<h2 id="experiments">The experiments</h2>
+<p>The experiments are listed in run order. "Runs" counts grid runs at the best state. The minutes per run are A100 estimates; the Time section gives their basis.</p>
+
+<h3 style="margin-top:28px">AR: controlled interventions</h3>
+
+<div class="exp"><header><h3>exp3 · history patching</h3><span class="tag">controlled/exp3_ar_history_patching</span></header>
+<p>How much does each history item matter, and where in the network does its information sit?</p>
+<dl>
+<dt>What it does</dt><dd>Part A replaces one history item at each recency (most recent first) with a catalog item sharing the first <i>m</i> digits, and scores the golden target digits by teacher forcing. Part B patches the residual stream at every layer from the clean run into the run where the most recent item was replaced, at that item's tokens, the separator and the target positions.</dd>
+<dt>Runs on</dt><dd>93 AR next-item runs; Part A also at both intermediate AR states</dd>
+<dt>Output</dt><dd>Change in golden digit log-probability by recency and shared prefix; the share of the effect each patch restores, by layer and position</dd>
+<dt>Time</dt><dd class="num">48 min per run (A 7, B 41)</dd></dl></div>
+
+<div class="exp"><header><h3>exp4 · prefix-matched copying</h3><span class="tag">controlled/exp4_ar_copy_circuit</span></header>
+<p>Does the model copy digit <i>d</i> from history items that already match the target's first <i>d</i> digits, and through which attention edges?</p>
+<dl>
+<dt>What it does</dt><dd>R: change digit <i>d</i> of a history item and compare items that match the target prefix with items that do not. K: remove the single attention edge from the readout of digit <i>d</i> to that item's digit-<i>d</i> token, in early layers, late layers and all layers, against a control edge. H: screen every head on half the users, then test the top 5 on the other half.</dd>
+<dt>Runs on</dt><dd>93 AR next-item runs, test and validation splits; Part R also at both intermediate states (test)</dd>
+<dt>Output</dt><dd>Copy effect in nats by digit; edge-knockout effect by layer range; held-out share of the top heads</dd>
+<dt>Time</dt><dd class="num">146 min per run (R+K 36 and H 37, per split)</dd></dl></div>
+
+<div class="exp"><header><h3>exp5 · next-two conditioning</h3><span class="tag">controlled/exp5_ar_next_two_conditioning</span></header>
+<p>In next-two models, how much does item 2 depend on item 1?</p>
+<dl>
+<dt>What it does</dt><dd>Clamp item 1 of the target to another catalog item at each shared-prefix level and score item 2; compare with replacing the most recent history item. Patch the residual stream of item 1, the separator and item 2 at every layer.</dd>
+<dt>Runs on</dt><dd>93 AR next-two runs</dd>
+<dt>Output</dt><dd>Item-1 effect on item 2's digits; where item-1 information sits by layer</dd>
+<dt>Time</dt><dd class="num">35 min per run</dd></dl></div>
+
+<div class="exp"><header><h3>exp6 · copy reads blocked during decoding</h3><span class="tag">controlled/exp6_ar_copy_in_decoding (run_grid.py)</span></header>
+<p>Does copying help or hurt the final top-10 list, and for which targets?</p>
+<dl>
+<dt>What it does</dt><dd>Decodes the test cohort with the run's own decoder (constrained beam search, 50 beams, then raw-vocabulary rescoring of every returned SID) four times. B: no edit. C_later: when a beam predicts digit <i>d</i>, block its reads of digit <i>d</i> of history items whose first <i>d</i> digits equal the beam's own prefix (layers 14–27). C_all: C_later plus every first-digit read. N_later: block as many reads of non-matching items. The same edges are blocked in the rescoring pass, because the list is ranked by it.</dd>
+<dt>Runs on</dt><dd>93 AR next-item runs</dd>
+<dt>Output</dt><dd>SID and item Hit@10 and NDCG@10 per condition, overall and by target class (same item, SID partner, near-duplicate variant, new)</dd>
+<dt>Time</dt><dd class="num">70 min per run at plan rates; about 10 h if decoding runs one row at a time</dd></dl></div>
+
+<div class="exp"><header><h3>exp9 · list order against review time</h3><span class="tag">controlled/exp9_ar_order_vs_time</span></header>
+<p>Does the model follow the position of the two most recent items, or their review days?</p>
+<dl>
+<dt>What it does</dt><dd>Swaps the two most recent history items and splits rows by their review days (later day, same day with a later target, same day as the target). Teacher-forced scores for all rows; a decode of the swapped prompts for the decision-level effect. Rows whose review day cannot be settled (one Office event) are left out.</dd>
+<dt>Runs on</dt><dd>93 AR next-item runs</dd>
+<dt>Output</dt><dd>Position and item effects on the first digit; how often the top-1 SID flips; Hit@10 change</dd>
+<dt>Time</dt><dd class="num">34 min per run at plan rates; about 4.7 h if decoding runs one row at a time</dd></dl></div>
+
+<div class="exp"><header><h3>exp10 · last digit of a prefix-matching item</h3><span class="tag">controlled/exp10_ar_last_digit_sibling</span></header>
+<p>At the last digit, does reading a matching history item push the model toward that item's code or away from it?</p>
+<dl>
+<dt>What it does</dt><dd>Removes the edge from the last-digit readout to the last-digit token of the most recent history item that matches the target on all earlier digits, against a control edge; splits rows by whether the target is that item's sibling.</dd>
+<dt>Runs on</dt><dd>93 AR next-item runs, test and validation splits</dd>
+<dt>Output</dt><dd>Log-probability of the item's own code and of the target's code; how often each is top-1</dd>
+<dt>Time</dt><dd class="num">4 min per run</dd></dl></div>
+
+<h3 style="margin-top:28px">AR: representations (one job per run)</h3>
+<p>Each AR next-item run gets one job that captures activations to scratch, runs the three experiments, then deletes the captures.</p>
+
+<div class="exp"><header><h3>representation exp1 · logit lens and probes</h3><span class="tag">representation/exp1_ar_digit_decoding</span></header>
+<dl>
+<dt>What it does</dt><dd>Captures all 28 layers at the history, header and target tokens of the test split. Reads each layer through the model's own unembedding (logit lens) and fits user-disjoint linear probes for the target's digits and the most recent item's first digit.</dd>
+<dt>Output</dt><dd>The layer where the copy preference appears; which digits are linearly present at the readout</dd>
+<dt>Time</dt><dd class="num">≈145 min per run (pilot: 83 min on 64 rows, mostly fixed probe-fitting cost)</dd></dl></div>
+
+<div class="exp"><header><h3>representation exp2 · sparse autoencoders</h3><span class="tag">representation/exp2_ar_sae</span></header>
+<dl>
+<dt>What it does</dt><dd>Trains TopK SAEs at layers 12, 16, 20 and 24 on train-split captures; finds copy and prefix-match latents on held-out users; ablates them at the readout against matched control latents. Includes the A1 amendment (latents matched by within-digit AUC).</dd>
+<dt>Output</dt><dd>Reconstruction quality; causal effect of copy latents; prefix-match latents and their effect</dd>
+<dt>Time</dt><dd class="num">≈100 min per run</dd></dl></div>
+
+<div class="exp"><header><h3>representation exp3 · information map</h3><span class="tag">representation/exp3_ar_information_map</span></header>
+<dl>
+<dt>What it does</dt><dd>Captures with the model's own greedy answer in the target slot; trains SAEs at every second layer; labels every latent (census); fits a tuned lens and SID decoders per layer.</dd>
+<dt>Output</dt><dd>What each layer's latents encode; the layer from which the answer is fixed</dd>
+<dt>Time</dt><dd class="num">≈125 min per run</dd></dl></div>
+
+<h3 style="margin-top:28px">DiffGRM</h3>
+
+<div class="exp"><header><h3>exp1 and exp2 · reveal orders at equal beams</h3><span class="tag">controlled/exp1_matched_beam, exp2_fixed_orders</span></header>
+<dl>
+<dt>What it does</dt><dd>exp1 decodes with confidence-ordered reveals and with one fixed order at beams 64 and 256. exp2 runs all six fixed orders on depth-3 maps. On the grid both add the run's own search (left to right, catalog-legal codes at every step) as a condition.</dd>
+<dt>Runs on</dt><dd>93 DiffGRM next-item runs (exp2: the 31 depth-3 maps)</dd>
+<dt>Output</dt><dd>SID and item Hit@10 per reveal policy and the paired differences</dd></dl></div>
+
+<div class="exp"><header><h3>exp7, exp8, exp12 · how DiffGRM uses the history</h3><span class="tag">controlled/exp7, exp8, exp12</span></header>
+<dl>
+<dt>What it does</dt><dd>exp7 replaces history items and knocks out cross-attention edges, as exp3/exp4 do for AR. exp8 separates the encoder route (other slots reading the most recent item) from the direct decoder read. exp12 patches encoder slots, decoder residuals and cross-attention outputs between paired runs. All three score states without decoding and run on CPU.</dd>
+<dt>Runs on</dt><dd>93 DiffGRM next-item runs; exp7 also at every DiffGRM snapshot</dd></dl></div>
+
+<div class="exp"><header><h3>exp13, exp14 · interventions held through decoding</h3><span class="tag">controlled/exp13, exp14</span></header>
+<dl>
+<dt>What it does</dt><dd>exp13 replaces the most recent item only at chosen reveal steps (on the grid, step <i>t</i> reveals digit <i>t</i>). exp14 blocks the copy route for the whole decode, swaps the two most recent items, and shifts the history by 1 or 5 slots. Both use the run's own decoder.</dd>
+<dt>Output</dt><dd>Which steps decide the top-1; Hit@10 change by target class</dd></dl></div>
+
+<div class="exp"><header><h3>representation exp4, exp5 · reveal trace and encoder features</h3><span class="tag">representation/exp4, exp5</span></header>
+<dl>
+<dt>What it does</dt><dd>exp4 records what the decoder holds at every reveal step and block. exp5 fits probes and SAEs on the encoder and a description autoencoder.</dd>
+<dt>Time</dt><dd class="num">exp1, exp13, exp14, rep4, rep5, N1, N3 together: ≈51 min per DiffGRM run</dd></dl></div>
+
+<h3 style="margin-top:28px">Saved test lists (CPU)</h3>
+
+<div class="exp"><header><h3>retrospective exp2, exp3, exp4, exp6, exp7</h3><span class="tag">python -m sidlens.grid.saved_lists</span></header>
+<dl>
+<dt>What it does</dt><dd>Recomputes the earlier audits from each run's saved lists. exp2: the first wrong digit of the top-1. exp3: SID-level hits against item-level bounds, collided against singleton targets. exp4: in next-two lists, P(item 2 right | item 1 right) against P(item 2 right | item 1 wrong). exp6: hits and the top-1's copy of the most recent item's first code by review-day gap. exp7: exp6's conditions re-scored at item level by target class.</dd>
+<dt>Runs on</dt><dd>All 372 runs (exp4: the 186 next-two runs; exp7: the 93 AR next-item runs)</dd>
+<dt>Time</dt><dd class="num">seconds to a few minutes per run</dd></dl></div>
+
+<h3 style="margin-top:28px">New experiments (protocols written before any result)</h3>
+
+<div class="exp"><header><h3>N1 · prefix conditioning</h3><span class="tag">additions/n1_prefix_conditioning</span></header>
+<p>Does the copy need the item's whole prefix to match, or only the digit just before it, as a plain induction head would?</p>
+<dl>
+<dt>What it does</dt><dd>For each row and digit <i>d</i> ≥ 2, take the most recent history item h whose first <i>d</i> digits equal the target's. Replace h with an item that keeps only digits <i>d</i>−1 and <i>d</i> (suffix), one that keeps neither (none), or one that keeps the prefix but changes digit <i>d</i> (prefix). Score digit <i>d</i> at the golden prefix.</dd>
+<dt>Runs on</dt><dd>93 AR and 93 DiffGRM next-item runs</dd>
+<dt>Primary result</dt><dd>ρ = support(suffix) / support(full). Near 0 means prefix-conditioned copying; near 1 means last-token copying.</dd>
+<dt>Time</dt><dd class="num">15 min per AR run</dd></dl></div>
+
+<div class="exp"><header><h3>N2 · how the AR model matches the prefix</h3><span class="tag">additions/n2_ar_prefix_match</span></header>
+<dl>
+<dt>What it does</dt><dd>On N1's rows: (a) attention to h's digit token per head; (b) replace only the key, or only the value, at that token in layers 14–27 with the suffix run's; (c) block, in layers 0–13, h's digit token from reading h's earlier digits; (d) take the query from a run whose prefix matches another item and see whether attention follows; (e) each late head's direct contribution to the copied code; (f) induction scores of the base Qwen2.5-1.5B-Instruct heads against each run's head screen from exp4.</dd>
+<dt>Primary result</dt><dd>The share of the copy removed by the key replacement and by the value replacement</dd>
+<dt>Time</dt><dd class="num">50 min per run; (f) about 1 GPU-hour once</dd></dl></div>
+
+<div class="exp"><header><h3>N3 · copy dose-response</h3><span class="tag">additions/n3_copy_dose</span></header>
+<dl>
+<dt>What it does</dt><dd>Scales the attention weights that exp6 (AR) and exp14 (DiffGRM) block by α ∈ {0, 0.25, 0.5, 1, 1.5, 2} inside the run's own beam search. α = 0 is the block; α = 1 changes nothing and is checked bit for bit.</dd>
+<dt>Primary result</dt><dd>Change in new-target SID Hit@10 at α = 0.5; repeat and new targets at SID and item level</dd>
+<dt>Time</dt><dd class="num">AR 105 min per run at plan rates; about 14.5 h if decoding runs one row at a time</dd></dl></div>
+
+<div class="exp"><header><h3>N4 · no-training baselines</h3><span class="tag">additions/n4_no_training_baselines</span></header>
+<dl>
+<dt>What it does</dt><dd>Three top-10 lists without a model: a copy rule (history prefix overlap, then recency, then popularity), training popularity, and popularity within the most recent item's first code. Each is compared with the run's saved list.</dd>
+<dt>Primary result</dt><dd>Model minus popularity on new targets; how often the model's top-1 first code equals the copy rule's</dd>
+<dt>Time</dt><dd class="num">under a minute per run (CPU)</dd></dl></div>
+
+<h2 id="time">Time</h2>
+<p>Per-run minutes come from the per-part times of our earlier A100 jobs, scaled to 6,297 events per catalog (<code>COPYING_GRID_PLAN.md</code> §5.1), with two corrections: exp4 runs Part H on both splits, and the representation experiments run as one GPU job per model, so their CPU stages hold the GPU.</p>
+
+<div class="note"><b>The main uncertainty is AR decoding.</b> The grid evaluates AR models with 50 beams, one row at a time, then rescores up to 50 candidate SIDs one at a time. Our decoder does the same, because V2a requires it to reproduce the saved lists. If a row takes about 1.4 s on an A100 (≈0.15 s of search and ≈1.25 s of rescoring), one decode of 6,297 rows takes about 2.4 h, and exp6, exp9 and N3 cost about 2,700 GPU-hours instead of 325. The pilot measures this directly. If it holds, the cheapest fix is to rescore each row's candidates in one batch for the intervention conditions; all conditions would still go through the same route, and V2b already reports any difference from the plain decoder.</div>
+
+<div class="scroll" style="margin-top:20px">
+<svg id="bars" viewBox="0 0 900 420" width="900" height="420" role="img" aria-label="GPU-hours per experiment under both scenarios"></svg>
+</div>
+<div class="legend"><span><span class="sw" style="background:var(--gpu)"></span>GPU-hours at plan rates</span><span><span class="sw" style="background:var(--gpu-b)"></span>extra if AR decoding runs one row at a time</span></div>
+
+<div class="scroll" style="margin-top:18px"><table id="cost">
+<thead><tr><th>Experiment</th><th>Runs</th><th class="r">Min / run</th><th class="r">GPU-h (plan)</th><th class="r">GPU-h (slow decoding)</th><th class="r">CPU-h</th><th>Pilot, 64 rows</th></tr></thead>
+<tbody></tbody></table></div>
+
+<h3 style="margin-top:26px">Wall-clock time</h3>
+<p>GPU-hours divided by the GPUs in use, plus 25 % for queueing, dependencies and reruns. CPU work runs alongside.</p>
+<div class="scroll"><table>
+<thead><tr><th>GPUs at once</th><th class="r">Plan rates, full set</th><th class="r">Plan rates, best state only</th><th class="r">Slow decoding, full set</th></tr></thead>
+<tbody>
+<tr><td class="num">16</td><td class="r num">≈5.0 days</td><td class="r num">≈4.7 days</td><td class="r num">≈12.7 days</td></tr>
+<tr><td class="num">32</td><td class="r num">≈2.5 days</td><td class="r num">≈2.4 days</td><td class="r num">≈6.4 days</td></tr>
+<tr><td class="num">64</td><td class="r num">≈1.2 days</td><td class="r num">≈1.2 days</td><td class="r num">≈3.2 days</td></tr>
+</tbody></table></div>
+
+<h2 id="verification">Verification so far</h2>
+<p>Tested here on the OneDiffRec handoff smoke runs (one Industrial map, AR and DiffGRM, next-item and next-two; one Office DiffGRM next-two run) and on our frozen checkpoints.</p>
+<div class="scroll"><table>
+<thead><tr><th>Test</th><th>Result</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>CPU test suite</td><td><span class="pill ok">406 passed</span></td><td>Includes the grid decoders against the vendored OneDiffRec decoders, bit for bit</td></tr>
+<tr><td>Old vs new code, AR (GPU, frozen checkpoints)</td><td><span class="pill ok">identical</span></td><td>exp3, exp4, exp5, exp9, exp10: every result file equal on 64 rows</td></tr>
+<tr><td>Old vs new code, DiffGRM (CPU, frozen checkpoints)</td><td><span class="pill ok">identical</span></td><td>exp7, exp8, exp12, exp13, exp14, rep exp4, rep exp5</td></tr>
+<tr><td>DiffGRM grid cells (GPU pilot)</td><td><span class="pill ok">pass</span></td><td>Saved lists reproduced; scorer equal to the evaluator (difference 0.0); all no-op controls exact</td></tr>
+<tr><td>AR decoder against OneDiffRec's fixed evaluator (CPU)</td><td><span class="pill ok">16/16 exact</span></td><td>exp6, exp9 and N3 each reproduced the reference lists with score difference 0.0</td></tr>
+<tr><td>AR grid experiments end to end (CPU)</td><td><span class="pill ok">all ran</span></td><td>exp3, exp4, exp5, exp6, exp9, exp10, N1, N2, N3, N4, saved-list analyses. N2 needed one fix (detach weights) and passed on rerun.</td></tr>
+<tr id="v-exp3"><td>exp3 bit-exact controls on grid rows (GPU)</td><td><span class="pill pend">pending</span></td><td>Fixed: every row now keeps one pad token, so each forward uses the same attention kernel. Rerun queued.</td></tr>
+<tr id="v-chain"><td>Representation chain after exp2 analyze (GPU)</td><td><span class="pill pend">pending</span></td><td>exp2 causal and amendment, exp3 SAEs, census and lens. Rerun queued.</td></tr>
+</tbody></table></div>
+
+<h2 id="send">What the coauthor needs</h2>
+<ul>
+<li>The sidlens code (push or tarball) and <code>sidlens-grid-inputs-20261021.tar.gz</code> (labels and near-duplicate pairs, 12 MB).</li>
+<li>Steps: <code>sidlens-grid.sh setup</code>, <code>register</code>, <code>pilot</code>, then <code>run_best_state.sh</code> or <code>run_full.sh</code>, then <code>summarize</code> and <code>export</code>.</li>
+<li>Send back: the pilot's <code>timings-*.json</code> first, then the exported <code>results_remote</code> tarball.</li>
+</ul>
+</div>
+
+<script>
+// GPU-hours: plan rates (a), slow AR decoding (b). Runs: 93 per paradigm and task unless noted.
+const rows = [
+  ["AR", "exp3 history patching", "93", 48, 74, 74, 0, "56 s"],
+  ["AR", "exp4 copying, both splits", "93", 146, 226, 226, 0, "99 s"],
+  ["AR", "exp5 next-two", "93", 35, 54, 54, 0, "46 s"],
+  ["AR", "exp6 copy block in decoding", "93", 70, 109, 930, 0, "re-run pending"],
+  ["AR", "exp9 order vs time", "93", 34, 53, 434, 0, "66 s"],
+  ["AR", "exp10 last digit", "93", 4, 6, 6, 0, "47 s"],
+  ["AR", "representation exp1-3 (one job)", "93", 370, 574, 574, 0, "85 min (exp1 83 min)"],
+  ["AR", "N1 prefix conditioning", "93", 15, 23, 23, 0, "CPU only"],
+  ["AR", "N2 prefix matching", "93", 50, 78, 78, 0, "CPU only"],
+  ["AR", "N2 (f) base-model induction", "1", 60, 1, 1, 0, "pending"],
+  ["AR", "N3 dose-response", "93", 105, 163, 1349, 0, "CPU only"],
+  ["AR", "cheap set at AR checkpoints", "186 states", 25, 78, 78, 0, ""],
+  ["DiffGRM", "exp1, exp13, exp14, rep4, rep5, N1, N3", "93", 51, 79, 79, 0, "16, 18, 12, 8, 362 s"],
+  ["DiffGRM", "exp2 six orders", "31", 7, 4, 4, 0, "16 s"],
+  ["DiffGRM", "exp7, exp8, exp12 (CPU)", "93", 25, 0, 0, 39, "12, 9, 52 s"],
+  ["DiffGRM", "exp7 at every snapshot (CPU)", "≈190 states", 8, 0, 0, 25, ""],
+  ["Both", "saved-list analyses and N4 (CPU)", "372", 2, 0, 0, 15, "1-2 s"],
+];
+const fmt = n => n ? n.toLocaleString("en-US") : "–";
+const tb = document.querySelector("#cost tbody");
+let group = "", ta = 0, tb2 = 0, tc = 0;
+for (const [g, name, runs, mins, a, b, c, pilot] of rows) {
+  if (g !== group) { group = g; tb.insertAdjacentHTML("beforeend", `<tr class="group"><td colspan="7">${g}</td></tr>`); }
+  ta += a; tb2 += b; tc += c;
+  tb.insertAdjacentHTML("beforeend", `<tr><td>${name}</td><td class="num">${runs}</td><td class="r num">${mins}</td>
+    <td class="r num">${fmt(a)}</td><td class="r num">${b !== a ? "<b>" + fmt(b) + "</b>" : fmt(b)}</td><td class="r num">${fmt(c)}</td><td class="num">${pilot}</td></tr>`);
+}
+tb.insertAdjacentHTML("beforeend", `<tr class="total"><td>Total, full set</td><td></td><td></td><td class="r num">${fmt(ta)}</td><td class="r num">${fmt(tb2)}</td><td class="r num">${fmt(tc)}</td><td></td></tr>`);
+
+// Bar chart, drawn to one scale: GPU rows only.
+const svg = document.getElementById("bars"), NS = "http://www.w3.org/2000/svg";
+const gpu = rows.filter(r => r[5] > 0).sort((x, y) => y[5] - x[5]);
+const L = 260, R = 860, max = 1400, bh = 16, gap = 8, top = 24;
+const x = v => L + (R - L) * Math.min(v, max) / max;
+const el = (t, a, txt) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; svg.appendChild(e); return e; };
+for (const t of [0, 200, 400, 600, 800, 1000, 1200, 1400]) {
+  el("line", {x1: x(t), x2: x(t), y1: top - 6, y2: top + gpu.length * (bh + gap), stroke: "var(--rule)", "stroke-width": 1});
+  el("text", {x: x(t), y: top - 10, "text-anchor": "middle", class: "ax"}, t.toLocaleString("en-US"));
+}
+gpu.forEach((r, i) => {
+  const y = top + i * (bh + gap);
+  el("text", {x: L - 8, y: y + bh - 4, "text-anchor": "end"}, r[1]);
+  el("rect", {x: L, y, width: x(r[4]) - L, height: bh, fill: "var(--gpu)", rx: 2});
+  if (r[5] > r[4]) el("rect", {x: x(r[4]), y, width: x(r[5]) - x(r[4]), height: bh, fill: "var(--gpu-b)", rx: 2});
+  el("text", {x: x(r[5]) + 6, y: y + bh - 4, class: "ax"}, r[5].toLocaleString("en-US") + (r[5] > r[4] ? " (" + r[4] + ")" : ""));
+});
+svg.setAttribute("viewBox", `0 0 900 ${top + gpu.length * (bh + gap) + 10}`);
+svg.setAttribute("height", top + gpu.length * (bh + gap) + 10);
+</script>

@@ -1,0 +1,907 @@
+<title>DiffGRM Reveal Trace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (max 1040px) under a slim sticky section bar; each chart spans the column with its data table folded beneath it. Tokens follow the SidLens interventions report (same quantizer hues, same faces). */
+:root {
+  --page: #f4f5f7; --surface: #fcfcfb; --surface-2: #eef0f3;
+  --ink: #101318; --ink-2: #474d57; --muted: #6c727b;
+  --grid: #e3e5e9; --axis: #c3c7cd; --rule: #dcdfe4;
+  --s-rqk: #2a78d6; --s-rqvae: #eb6834; --s-mq: #1baf7a; --s-ctx: #9ba1aa;
+  --good: #0ca30c; --good-ink: #006300; --crit: #d03b3b; --crit-ink: #a52626;
+  --part: #eda100; --part-ink: #7a5b00; --wait: #2a78d6; --wait-ink: #1f5aa3;
+  --band-op: 0.14;
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0e0f11; --surface: #1a1a19; --surface-2: #232427;
+    --ink: #f2f3f5; --ink-2: #c1c5cc; --muted: #959aa3;
+    --grid: #2c2d2f; --axis: #45474b; --rule: #2e3034;
+    --s-rqk: #3987e5; --s-rqvae: #d95926; --s-mq: #199e70; --s-ctx: #6e747d;
+    --good: #3ec43e; --good-ink: #5fd35f; --crit: #e66767; --crit-ink: #ef8a8a;
+    --part: #c98500; --part-ink: #e0b440; --wait: #3987e5; --wait-ink: #7fb2f0;
+    --band-op: 0.22; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0e0f11; --surface: #1a1a19; --surface-2: #232427;
+  --ink: #f2f3f5; --ink-2: #c1c5cc; --muted: #959aa3;
+  --grid: #2c2d2f; --axis: #45474b; --rule: #2e3034;
+  --s-rqk: #3987e5; --s-rqvae: #d95926; --s-mq: #199e70; --s-ctx: #6e747d;
+  --good: #3ec43e; --good-ink: #5fd35f; --crit: #e66767; --crit-ink: #ef8a8a;
+  --part: #c98500; --part-ink: #e0b440; --wait: #3987e5; --wait-ink: #7fb2f0;
+  --band-op: 0.22; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 0 64px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(26px, 4.2vw, 36px); font-weight: 600; letter-spacing: -0.015em; }
+h2 { font-size: 23px; font-weight: 600; letter-spacing: -0.01em; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--wait-ink); }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+.num { font-variant-numeric: tabular-nums; }
+.eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* header */
+header.top { padding-block: 40px 22px; display: grid; gap: 12px; }
+header.top .meta { color: var(--ink-2); max-width: 70ch; }
+
+/* sticky section bar */
+nav.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--page);
+  border-bottom: 1px solid var(--rule); }
+nav.bar .in { max-width: 1040px; margin: 0 auto; padding-inline: 20px; display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; }
+nav.bar a { color: var(--ink-2); text-decoration: none; font-size: 13.5px; padding-block: 10px; white-space: nowrap; border-bottom: 2px solid transparent; }
+nav.bar a:hover, nav.bar a:focus-visible { color: var(--ink); border-bottom-color: var(--axis); outline: none; }
+
+/* status strip */
+.status { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-block: 22px 8px; }
+.stat { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: grid; gap: 6px; min-width: 0; }
+.stat .k { font-weight: 600; }
+.stat .v { color: var(--ink-2); font-size: 13.5px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 2px 8px; border-radius: 999px; width: fit-content; font-weight: 500; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip.good { color: var(--good-ink); background: color-mix(in srgb, var(--good) 13%, transparent); }
+.chip.crit { color: var(--crit-ink); background: color-mix(in srgb, var(--crit) 13%, transparent); }
+.chip.part { color: var(--part-ink); background: color-mix(in srgb, var(--part) 16%, transparent); }
+.chip.wait { color: var(--wait-ink); background: color-mix(in srgb, var(--wait) 13%, transparent); }
+.chip.wait::before { background: transparent; border: 1.5px solid currentColor; }
+
+/* sections */
+section { padding-block: 44px 8px; border-top: 1px solid var(--rule); margin-top: 36px; display: grid; gap: 18px; scroll-margin-top: 56px; }
+section > header { display: grid; gap: 8px; }
+.lede { color: var(--ink-2); }
+ul.find { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: 74ch; }
+ul.find li::marker { color: var(--muted); }
+ul.find b { font-weight: 600; }
+.note { border-left: 3px solid var(--part); padding: 2px 0 2px 12px; color: var(--ink-2); max-width: 74ch; }
+
+/* figures */
+figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px 18px 12px; display: grid; gap: 10px; min-width: 0; }
+figure .cap { display: grid; gap: 4px; }
+figure .cap h3 + p { color: var(--ink-2); font-size: 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.key { display: inline-block; flex: none; }
+.key.line { width: 18px; height: 0; border-top: 2px solid var(--c); }
+.key.dash { width: 18px; height: 0; border-top: 2px dashed var(--c); }
+.key.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.key.ring { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--c); }
+.key.rect { width: 11px; height: 11px; border-radius: 2px; background: var(--c); }
+.key.hollow { width: 11px; height: 11px; border-radius: 2px; border: 1.5px solid var(--c); background: var(--surface-2); }
+.key.band { width: 18px; height: 10px; background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.viz { position: relative; width: 100%; min-width: 0; }
+.viz svg { display: block; width: 100%; height: auto; overflow: visible; }
+.viz svg text { font-family: var(--sans); fill: var(--muted); font-size: 11.5px; }
+.viz svg text.lab { fill: var(--ink-2); font-size: 12px; }
+.viz svg text.title { fill: var(--ink); font-size: 12.5px; font-weight: 600; }
+.viz .hit { fill: transparent; cursor: crosshair; }
+.viz .hit:focus-visible { outline: none; stroke: var(--axis); stroke-width: 1; }
+.viz .row-hit { fill: transparent; }
+.viz .row-hit.on { fill: color-mix(in srgb, var(--ink) 5%, transparent); }
+.small-multiples { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px 18px; }
+.tip { position: absolute; pointer-events: none; z-index: 3; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12); padding: 8px 10px; font-size: 12.5px; min-width: 150px; max-width: 280px; display: grid; gap: 3px; }
+.tip .h { color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.tip .r { display: flex; align-items: center; gap: 8px; }
+.tip .r b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.tip .r span.n { color: var(--ink-2); }
+
+/* tables */
+details.tbl summary { cursor: pointer; color: var(--ink-2); font-size: 13px; width: fit-content; }
+details.tbl summary:focus-visible { outline: 2px solid var(--wait); outline-offset: 2px; border-radius: 3px; }
+.tablewrap { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; font-size: 13px; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-weight: 600; color: var(--ink-2); font-size: 12px; }
+td.r, th.r { text-align: right; }
+table.verdicts td { white-space: normal; vertical-align: top; min-width: 9em; }
+table.verdicts td:first-child { font-family: var(--mono); font-size: 12px; min-width: 2.5em; }
+table.verdicts td.exp { min-width: 15em; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+table.verdicts td.how { color: var(--ink-2); min-width: 12em; }
+dl.log.terms { grid-template-columns: 9.5em minmax(0, 1fr); gap: 8px 16px; }
+dl.log.terms dt { font-family: var(--sans); font-size: 13.5px; font-weight: 600; color: var(--ink); padding-top: 1px; }
+.viz-col { display: grid; gap: 8px; min-width: 0; }
+/* recap + plan */
+.sec-tag { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+ol.ranked { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: rank; }
+ol.ranked li { counter-increment: rank; display: grid; grid-template-columns: 2em minmax(0, 1fr); gap: 4px 12px; padding-block: 14px; border-bottom: 1px solid var(--rule); }
+ol.ranked li:last-child { border-bottom: 0; }
+ol.ranked li::before { content: counter(rank); font-family: var(--mono); font-size: 13px; color: var(--muted); padding-top: 3px; grid-column: 1; grid-row: 1; }
+ol.ranked li > * { grid-column: 2; min-width: 0; }
+ol.ranked .t { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+ol.ranked .t a { color: var(--ink); font-weight: 600; text-decoration: none; font-size: 16px; }
+ol.ranked .t a:hover, ol.ranked .t a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+ol.ranked p { color: var(--ink-2); font-size: 14.5px; max-width: 76ch; }
+ol.ranked p.caveat { color: var(--muted); font-size: 13.5px; }
+.recap-group { display: grid; gap: 10px; }
+.recap-group > h3 { font-size: 15px; color: var(--ink); padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+dl.log { margin: 0; display: grid; grid-template-columns: 5.2em minmax(0, 1fr); gap: 12px 16px; }
+dl.log dt { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 3px; font-variant-numeric: tabular-nums; }
+dl.log dd { margin: 0; display: grid; gap: 3px; min-width: 0; max-width: 78ch; }
+dl.log dd .name { font-weight: 600; }
+dl.log dd .name span { font-weight: 400; color: var(--muted); font-family: var(--mono); font-size: 12px; margin-left: 6px; }
+dl.log dd p { color: var(--ink-2); font-size: 14px; }
+.plan { display: grid; gap: 12px; }
+.plan-item { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 4px 14px; align-items: start; padding-block: 12px; border-bottom: 1px solid var(--rule); }
+.plan-item:last-child { border-bottom: 0; }
+.plan-item .chip { margin-top: 2px; }
+.plan-item h3 { font-size: 15px; }
+.plan-item p { color: var(--ink-2); font-size: 14px; max-width: 76ch; }
+.plan-item .cost { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.deadline { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; color: var(--ink-2); }
+.deadline b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { dl.log, dl.log.terms { grid-template-columns: 1fr; gap: 2px 0; } dl.log dd { margin-bottom: 10px; } .plan-item { grid-template-columns: 1fr; } }
+footer.src { margin-top: 40px; color: var(--muted); font-size: 12.5px; display: grid; gap: 6px; }
+footer.src code { color: var(--ink-2); }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; } figure { padding: 14px 12px 10px; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* this page: flow diagram, option cards, heat tables, decode strips */
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.flow .box { flex: 1 1 150px; min-width: 0; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); display: grid; gap: 4px; align-content: start; }
+.flow .box b { font-weight: 600; font-size: 14px; }
+.flow .box span { color: var(--ink-2); font-size: 13px; }
+.flow .box.loop { background: transparent; border-style: dashed; }
+.flow .arr { flex: none; align-self: center; color: var(--muted); font-family: var(--mono); }
+.sid { display: inline-flex; gap: 3px; vertical-align: middle; }
+.sid i { font-style: normal; font-family: var(--mono); font-size: 12px; min-width: 2.3em; text-align: center; padding: 1px 4px; border-radius: 4px; border: 1px solid var(--axis); color: var(--ink); background: var(--surface); }
+.sid i.m { border-style: dashed; color: var(--muted); }
+.sid i.on { background: color-mix(in srgb, var(--ink) 14%, var(--surface)); border-color: var(--ink-2); }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.option { border: 1px solid var(--rule); border-radius: 8px; padding: 14px; display: grid; gap: 8px; align-content: start; min-width: 0; background: var(--surface); }
+.option p { font-size: 14px; color: var(--ink-2); }
+.steps { display: flex; gap: 4px; flex-wrap: wrap; }
+.steps i { font-style: normal; font-family: var(--mono); font-size: 11.5px; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--axis); color: var(--ink-2); }
+.steps i.d { background: color-mix(in srgb, var(--part) 30%, var(--surface)); border-color: var(--part); color: var(--ink); }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1.9em); gap: 3px; }
+.grid4 i { height: 1.2em; border-radius: 3px; border: 1px solid var(--axis); }
+.grid4 i.d { background: color-mix(in srgb, var(--part) 30%, var(--surface)); border-color: var(--part); }
+table.heat td.v { text-align: center; min-width: 3.4em; background: color-mix(in srgb, var(--ink) calc(var(--w) * 1%), var(--surface)); color: var(--ink); }
+table.heat td.na { text-align: center; color: var(--muted); }
+table.heat th.c { text-align: center; }
+table.strip td, table.strip th { white-space: nowrap; vertical-align: middle; }
+table.strip td.dg { text-align: center; }
+table.strip .cell { display: inline-grid; gap: 1px; justify-items: center; padding: 3px 6px; border-radius: 5px; border: 1px dashed var(--axis); min-width: 4.6em; }
+table.strip .cell.rev { border-style: solid; border-color: var(--ink-2); background: color-mix(in srgb, var(--ink) 14%, var(--surface)); }
+table.strip .cell.next { outline: 2px solid var(--part); outline-offset: 1px; }
+table.strip .cell b { font-family: var(--mono); font-weight: 500; font-size: 13px; color: var(--ink); }
+table.strip .cell small { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.kv { display: grid; grid-template-columns: 11.5em minmax(0, 1fr); gap: 6px 14px; font-size: 14px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; color: var(--ink-2); }
+.kv dd b { color: var(--ink); font-weight: 600; }
+@media (max-width: 560px) { .kv { grid-template-columns: 1fr; gap: 1px 0; } .kv dd { margin-bottom: 8px; } }
+table.plain td { white-space: normal; vertical-align: top; }
+table.plain td:first-child { white-space: nowrap; font-weight: 600; }
+table.plain td code { white-space: nowrap; }
+table.wrapth th { white-space: normal; vertical-align: bottom; min-width: 6.5em; }
+
+/* ordered series (SID depth) and shaded tables: one violet hue, light = shallow; the three quantizer hues stay reserved */
+:root { --d3: #a996ee; --d4: #6f55d9; --d5: #37248f; --seq: #6f55d9; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --d3: #6a54cf; --d4: #a08cf0; --d5: #dcd5fc; --seq: #8f7be6; } }
+:root[data-theme="dark"] { --d3: #6a54cf; --d4: #a08cf0; --d5: #dcd5fc; --seq: #8f7be6; }
+table.strip .cell.rev { background: color-mix(in srgb, var(--seq) 20%, var(--surface)); border-color: var(--seq); }
+.sid i.on { background: color-mix(in srgb, var(--seq) 18%, var(--surface)); border-color: var(--seq); }
+</style>
+
+<nav class="bar" aria-label="Sections"><div class="in">
+  <a href="#summary">Summary</a><a href="#idea">The question</a><a href="#method">What we ran</a><a href="#results">Results</a><a href="#examples">Three decodes</a><a href="#coverage">Coverage</a><a href="#next">Next experiments</a><a href="#sources">Sources</a>
+</div></nav>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">SidLens · DiffGRM step-level study · 13 Oct 2026 · <span id="gen"></span></div>
+  <h1>What a DiffGRM recommendation looks like while it is being decoded</h1>
+  <p class="meta">A first look inside the reveal steps of the masked-diffusion recommender, ahead of the patching experiments. Industrial_and_Scientific, next-item models, 6,297 test users, <span id="ncells"></span> of 20 checkpoints. Intervals are 95% paired user-bootstrap intervals (2,000 draws) and exclude training-seed variance: there is one checkpoint per configuration.</p>
+  <div class="status" id="status"></div>
+</header>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="summary">
+  <header>
+    <h2>Summary</h2>
+    <p class="lede">We recorded every decode step by step. This is an observational record: nothing in the model was changed, and no patching experiment has been run yet. The record tells us what those experiments should target.</p>
+  </header>
+  <ol class="ranked" id="findings"></ol>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="idea">
+  <header>
+    <div class="sec-tag"><span class="eyebrow">the question</span></div>
+    <h2>Patching the predicted noise, in a model that predicts no noise</h2>
+    <p class="lede">The plan was to take the noise a diffusion model predicts at step t in one run and put it into another run at the same step. DiffGRM cannot be patched that way. It is masked diffusion: it predicts codes, and it has no noise, no schedule and no step input.</p>
+  </header>
+
+  <figure>
+    <div class="cap"><h3>One decode step</h3>
+      <p>Read from the DiffGRM model and beam-search code that SidLens runs.</p></div>
+    <div class="flow" role="img" aria-label="History goes through a one-layer encoder once. The partial SID goes through four decoder blocks, which return a distribution over codes at each masked digit. The search writes one code. The next step starts from the new partial SID.">
+      <div class="box"><b>History</b><span>Up to 50 items. One token per item, built from its SID digits.</span></div>
+      <div class="arr">→</div>
+      <div class="box"><b>Encoder, once per user</b><span>One layer. Its states do not change during decoding.</span></div>
+      <div class="arr">→</div>
+      <div class="box"><b>Partial SID</b><span><span class="sid"><i class="on">92</i><i class="m">?</i><i class="m">?</i><i class="on">0</i></span><br>One position per digit: a code, or that digit's mask.</span></div>
+      <div class="arr">→</div>
+      <div class="box"><b>Decoder, four blocks</b><span>Digit positions read each other and read the history.</span></div>
+      <div class="arr">→</div>
+      <div class="box"><b>One distribution per masked digit</b><span>Over that digit's codes. Training only scored masked digits.</span></div>
+      <div class="arr">→</div>
+      <div class="box"><b>Commit</b><span>Beam search writes one code at one position.</span></div>
+      <div class="arr">↺</div>
+      <div class="box loop"><b>Repeat</b><span>Until no digit is masked. The next step gets the new partial SID and nothing else.</span></div>
+    </div>
+  </figure>
+
+  <div class="two">
+    <figure>
+      <div class="cap"><h3>How the terms line up</h3></div>
+      <div class="tablewrap"><table class="plain">
+        <thead><tr><th>Continuous diffusion</th><th>DiffGRM</th></tr></thead>
+        <tbody>
+          <tr><td>Noisy latent</td><td>Partial SID: revealed codes and masks</td></tr>
+          <tr><td>Step, noise level</td><td>Number of masked digits. The model is not told it.</td></tr>
+          <tr><td>Predicted noise</td><td>A distribution over codes at each masked digit</td></tr>
+          <tr><td>Denoising update</td><td>Writing one code at one position</td></tr>
+          <tr><td>Conditioning</td><td>The history, through the encoder states</td></tr>
+        </tbody>
+      </table></div>
+    </figure>
+    <figure>
+      <div class="cap"><h3>What follows for patching</h3></div>
+      <ul class="find">
+        <li>Only the partial SID and the beam score pass from one step to the next. Every activation is recomputed.</li>
+        <li>So another run's prediction can enter a step in three ways, shown below.</li>
+        <li>A patched decode always holds a valid partial SID. What can be unusual is the pairing of a state with a history the model never saw together.</li>
+      </ul>
+    </figure>
+  </div>
+
+  <div class="options">
+    <div class="option">
+      <h3>1. Same state, other history</h3>
+      <div class="steps" aria-label="four steps, the second scored with the donor history"><i>step 1</i><i class="d">step 2 · other history</i><i>step 3</i><i>step 4</i></div>
+      <p>Score chosen steps with a second history, on the decode's own partial SID. This is the direct counterpart of the original plan, and it works under beam search.</p>
+    </div>
+    <div class="option">
+      <h3>2. Other run's own state</h3>
+      <div class="sid"><i class="on">48</i><i class="m">?</i><i class="m">?</i><i class="m">?</i></div>
+      <p>The second run decoded freely, so its states differ. Taking its prediction then means taking the digit it wrote and letting the first run continue from there.</p>
+    </div>
+    <div class="option">
+      <h3>3. Inside one step</h3>
+      <div class="grid4" aria-label="four decoder blocks by four digit positions, one cell patched"><i></i><i></i><i></i><i></i><i></i><i class="d"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <p>Replace one run's activations with another's: an encoder state for one history item, or the decoder's stream after one block at one digit.</p>
+    </div>
+  </div>
+  <p class="note">Each of the three needs to know what the unpatched decode does at every step. No such record existed, so we made it first. It is what this page reports.</p>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="method">
+  <header>
+    <div class="sec-tag"><span class="eyebrow">reveal trace · observational</span></div>
+    <h2>What we ran</h2>
+    <p class="lede">We decoded every test user with every next-item checkpoint and wrote down what the search held at each step.</p>
+  </header>
+
+  <figure>
+    <div class="cap"><h3>Setup</h3></div>
+    <dl class="kv">
+      <dt>Checkpoints</dt><dd>All <b>20</b> trained next-item DiffGRM models: MQ, RQ-KMeans and RQ-VAE at depth 3, 4 and 5 and width 128 and 512, plus MQ 5×256 and RQ-VAE 3×256. One encoder layer, four decoder blocks, width 256.</dd>
+      <dt>Users</dt><dd>The <b>6,297</b>-user diffusion test cohort. The target is each user's last item.</dd>
+      <dt>Decoder</dt><dd>The confidence beam search of the matched-beam experiment. At each step it considers every masked digit and every code, and keeps the best paths by summed log-probability. The catalogue filter is applied after the last step.</dd>
+      <dt>Beam widths</dt><dd><b>1</b> (greedy), <b>64</b> and <b>256</b>.</dd>
+      <dt>Recording</dt><dd>The search reports each step to an observer. With the observer off, the search gives the same output bit for bit as before the change.</dd>
+      <dt>Protocol</dt><dd>Written before any forward pass: eight statistics and three predictions.</dd>
+      <dt>Compute</dt><dd>One A100 per checkpoint, 80 to 150 seconds each; <span id="secs"></span> for the saved checkpoints.</dd>
+    </dl>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>What was recorded</h3></div>
+    <dl class="log terms">
+      <dt>per step, per beam</dt><dd><p>The paths kept, how many are distinct partial SIDs, and how many can still become a catalogue SID. Which digit each path revealed.</p></dd>
+      <dt>two paths per user</dt><dd><p>The greedy path, and the best path of the first-ranked SID at beam 256. Each is replayed one state at a time. A path of depth n has n states; state 0 is fully masked.</p></dd>
+      <dt>at each state</dt><dd><p>The most probable codes at every masked digit, and the target code's probability and rank. Nothing is read at a revealed digit.</p></dd>
+      <dt>current guess</dt><dd><p>The state's best complete SID: revealed codes kept, each masked digit filled with its most probable code.</p></dd>
+      <dt>per decoder block</dt><dd><p>The model's own output head applied after each of the four blocks.</p></dd>
+      <dt>target lattice</dt><dd><p>All partial states of the target SID, which shows how much one revealed digit helps another.</p></dd>
+      <dt>trainer's order</dt><dd><p>The confidence ranking the trainer used to pick reveal orders, to tell which decode states training visited.</p></dd>
+    </dl>
+  </figure>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="results">
+  <header>
+    <div class="sec-tag"><span class="chip part">provisional</span><span class="eyebrow" id="res-tag"></span></div>
+    <h2>Results</h2>
+  </header>
+
+  <figure>
+    <div class="cap"><h3>Which digit is revealed first depends on the quantizer</h3>
+      <p>Share of users whose greedy path reveals each digit first. With no preference every digit would get the chance share. RQ-VAE starts with digit 1. RQ-KMeans and MQ have little preference, and the most common full order covers few users.</p></div>
+    <div class="tablewrap" id="t-first"></div>
+  </figure>
+
+  <div class="two">
+    <figure>
+      <div class="cap"><h3>Most decode states were never trained on</h3>
+        <p>Share of greedy-path states that training visited, by state. Training follows one reveal order per example. Depth-5 models never train on the fully masked state, where every decode starts.</p></div>
+      <div class="viz" id="v-family"></div>
+    </figure>
+    <figure>
+      <div class="cap"><h3>The answer forms over the steps</h3>
+        <p>Share of users whose current guess already equals the SID the greedy path ends on.</p></div>
+      <div class="viz" id="v-guess"></div>
+    </figure>
+  </div>
+
+  <div class="two">
+    <figure>
+      <div class="cap"><h3>The top code is often set before the last block</h3>
+        <p>Share of masked digits whose most probable code after a block equals the final one. Lines are means over each quantizer's checkpoints; bands span them. This reads the output head early and does not show what later blocks need.</p></div>
+      <div class="legend" id="lg-blocks"></div>
+      <div class="viz" id="v-blocks"></div>
+    </figure>
+    <figure>
+      <div class="cap"><h3>Paths that cannot become an item</h3>
+        <p>Beam 256. Share of kept paths that no catalogue SID completes. The search does not check this until the end.</p></div>
+      <div class="viz" id="v-dead"></div>
+    </figure>
+  </div>
+
+  <figure>
+    <div class="cap"><h3>Revealing one digit helps the others in every map</h3>
+      <p>Gain in the target code's log-probability at one digit when another target digit alone is revealed, in nats, for the three depth-3, width-128 maps. <span id="gain-note"></span> The states are teacher-forced, so this is a description.</p></div>
+    <div class="small-multiples" id="sm-gain"></div>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>At the fully masked start, confidence runs ahead of accuracy</h3>
+      <p>Mean highest probability minus top-1 accuracy, averaged over digits, at state 0. Zero would be calibrated.</p></div>
+    <div class="legend" id="lg-cal"></div>
+    <div class="viz" id="v-cal"></div>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>Predictions written before the run</h3><p>They are stated over all 20 checkpoints, so neither is settled yet. A third prediction concerns a comparison that is left out of this page.</p></div>
+    <div class="tablewrap" id="t-exp"></div>
+  </figure>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="examples">
+  <header>
+    <div class="sec-tag"><span class="eyebrow">worked examples · <span id="ex-cell"></span></span></div>
+    <h2>Three decodes, step by step</h2>
+    <p class="lede">Each row is one state of the best path of the first-ranked SID at beam 256. They are the first users in cohort order that fit each description, chosen to show the mechanics and not to be typical. In all three the target has the same SID as the user's most recent history item.</p>
+  </header>
+  <div class="legend" id="lg-strip"></div>
+  <div id="strips" style="display:grid;gap:18px"></div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="coverage">
+  <header>
+    <div class="sec-tag"><span class="eyebrow">coverage and checks</span></div>
+    <h2>Four checkpoints are not in these numbers</h2>
+    <p class="lede" id="cov-lede"></p>
+  </header>
+  <figure>
+    <div class="cap"><h3>How the four differ from the matched-beam lists</h3>
+      <p>Each was decoded again and compared user by user. The earlier lists were decoded on an RTX 5000 Ada and these on an A100.</p></div>
+    <div class="tablewrap" id="t-diag"></div>
+  </figure>
+  <p class="note">In each of the four, one or two users of 6,297 have a tie broken differently. No target changes rank and Hit@10 is identical. We propose to accept a checkpoint when every differing list is such a tie, to record the count, and to rerun these four.</p>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="next">
+  <header>
+    <h2>Next experiments</h2>
+    <p class="lede">The code for all three kinds of patching is written and tested on a model with random weights: an intervention that changes nothing leaves the output identical, and one that cannot take effect raises an error. None has been run on a trained checkpoint.</p>
+  </header>
+  <div class="plan">
+    <div class="plan-item"><span class="chip wait">next</span><div>
+      <h3>Switch the history at single steps</h3>
+      <p>Decode with a second history at chosen steps: the same history with its most recent item replaced. This measures at which step the copy of the recent item is committed, and whether later steps can undo an early commit. Protocol to be written before the first switched decode.</p>
+      <div class="cost">controlled exp12 · GPU, minutes per checkpoint · five checkpoints</div></div></div>
+    <div class="plan-item"><span class="chip wait">next</span><div>
+      <h3>Activation patching inside one step</h3>
+      <p>Swap encoder states by history item, and the decoder's stream by block and digit, between two histories and between two partial SIDs. This locates where a revealed digit's information reaches the digit being predicted. Given the result above, the protocol will not assume that MQ digits are weakly coupled.</p>
+      <div class="cost">controlled exp13 · minutes per checkpoint</div></div></div>
+    <div class="plan-item"><span class="chip wait">pending</span><div>
+      <h3>The four remaining checkpoints</h3>
+      <p>Rerun them once the tie rule is agreed, then judge the predictions on all 20.</p>
+      <div class="cost">four GPU jobs of about two minutes</div></div></div>
+    <div class="plan-item"><span class="chip wait">later</span><div>
+      <h3>Paper figures and a per-user viewer</h3>
+      <p>The saved records hold both paths of every user; this page shows three users.</p>
+      <div class="cost">CPU</div></div></div>
+  </div>
+</section>
+
+<footer class="src" id="sources"></footer>
+</div>
+
+<script>
+const D = {"generated":"2026-10-13 19:38","cells":[{"id":"diff-next1-MQ-3cb-128","q":"MQ","depth":3,"width":128,"label":"MQ 3\u00d7128","v6":"passed","sid_hit10_beam1":0.0823,"sid_hit10_beam64":0.2047,"sid_hit10_beam256":0.2058,"sid_hit10_beam256_lo":0.1958,"sid_hit10_beam256_hi":0.2153,"state0_catalogue_sid_hit10":0.1548,"state0_catalogue_sid_hit10_lo":0.1459,"state0_catalogue_sid_hit10_hi":0.1639,"greedy_first_is_digit1":0.2868,"greedy_modal_order_share":0.2631,"greedy_states_in_trained_family":0.5828,"greedy_sid_settled_at_state0":0.5204,"top1_sid_settled_at_state0":0.4383,"beam256_final_duplicate_share":0.5528,"beam256_final_unreachable_share":0.2321,"regret_any_digit":0.1099,"regret_any_digit_lo":0.1023,"regret_any_digit_hi":0.1174,"state0_confidence_minus_accuracy":0.045,"state0_confidence_minus_accuracy_lo":0.0384,"state0_confidence_minus_accuracy_hi":0.0522,"state0_top1_accuracy":0.2063,"state0_mean_max_probability":0.2514,"target_best_order_differs_from_greedy":0.7786,"target_best_minus_greedy_order_score":1.1879,"top1_found":1.0,"modal_order":"321","state0_item_hit10_lo":0.0751,"state0_item_hit10_hi":0.1074},{"id":"diff-next1-MQ-3cb-512","q":"MQ","depth":3,"width":512,"label":"MQ 3\u00d7512","v6":"passed","sid_hit10_beam1":0.0861,"sid_hit10_beam64":0.1788,"sid_hit10_beam256":0.1785,"sid_hit10_beam256_lo":0.1694,"sid_hit10_beam256_hi":0.1882,"state0_catalogue_sid_hit10":0.1482,"state0_catalogue_sid_hit10_lo":0.1399,"state0_catalogue_sid_hit10_hi":0.1569,"greedy_first_is_digit1":0.2936,"greedy_modal_order_share":0.1953,"greedy_states_in_trained_family":0.5563,"greedy_sid_settled_at_state0":0.3063,"top1_sid_settled_at_state0":0.3057,"beam256_final_duplicate_share":0.6464,"beam256_final_unreachable_share":0.1441,"regret_any_digit":0.0299,"regret_any_digit_lo":0.0257,"regret_any_digit_hi":0.0341,"state0_confidence_minus_accuracy":0.1029,"state0_confidence_minus_accuracy_lo":0.0967,"state0_confidence_minus_accuracy_hi":0.1092,"state0_top1_accuracy":0.12,"state0_mean_max_probability":0.2228,"target_best_order_differs_from_greedy":0.6684,"target_best_minus_greedy_order_score":0.6938,"top1_found":1.0,"modal_order":"213","state0_item_hit10_lo":0.1051,"state0_item_hit10_hi":0.1239},{"id":"diff-next1-MQ-4cb-128","q":"MQ","depth":4,"width":128,"label":"MQ 4\u00d7128","v6":"passed","sid_hit10_beam1":0.0769,"sid_hit10_beam64":0.1625,"sid_hit10_beam256":0.1777,"sid_hit10_beam256_lo":0.1682,"sid_hit10_beam256_hi":0.1876,"state0_catalogue_sid_hit10":0.1367,"state0_catalogue_sid_hit10_lo":0.1283,"state0_catalogue_sid_hit10_hi":0.1456,"greedy_first_is_digit1":0.2292,"greedy_modal_order_share":0.0807,"greedy_states_in_trained_family":0.3841,"greedy_sid_settled_at_state0":0.2488,"top1_sid_settled_at_state0":0.2368,"beam256_final_duplicate_share":0.831,"beam256_final_unreachable_share":0.1955,"regret_any_digit":0.1288,"regret_any_digit_lo":0.1204,"regret_any_digit_hi":0.1372,"state0_confidence_minus_accuracy":0.0957,"state0_confidence_minus_accuracy_lo":0.0894,"state0_confidence_minus_accuracy_hi":0.1024,"state0_top1_accuracy":0.1896,"state0_mean_max_probability":0.2853,"target_best_order_differs_from_greedy":0.9147,"target_best_minus_greedy_order_score":1.8047,"top1_found":1.0,"modal_order":"3124","state0_item_hit10_lo":0.0826,"state0_item_hit10_hi":0.1002},{"id":"diff-next1-MQ-4cb-512","q":"MQ","depth":4,"width":512,"label":"MQ 4\u00d7512","v6":"passed","sid_hit10_beam1":0.0845,"sid_hit10_beam64":0.1429,"sid_hit10_beam256":0.1621,"sid_hit10_beam256_lo":0.1532,"sid_hit10_beam256_hi":0.1712,"state0_catalogue_sid_hit10":0.1385,"state0_catalogue_sid_hit10_lo":0.1301,"state0_catalogue_sid_hit10_hi":0.1469,"greedy_first_is_digit1":0.2658,"greedy_modal_order_share":0.0621,"greedy_states_in_trained_family":0.4063,"greedy_sid_settled_at_state0":0.2555,"top1_sid_settled_at_state0":0.2563,"beam256_final_duplicate_share":0.8673,"beam256_final_unreachable_share":0.1434,"regret_any_digit":0.0289,"regret_any_digit_lo":0.0248,"regret_any_digit_hi":0.0332,"state0_confidence_minus_accuracy":0.1156,"state0_confidence_minus_accuracy_lo":0.1097,"state0_confidence_minus_accuracy_hi":0.1215,"state0_top1_accuracy":0.1168,"state0_mean_max_probability":0.2324,"target_best_order_differs_from_greedy":0.8591,"target_best_minus_greedy_order_score":1.2551,"top1_found":1.0,"modal_order":"1243","state0_item_hit10_lo":0.1062,"state0_item_hit10_hi":0.1237},{"id":"diff-next1-MQ-5cb-128","q":"MQ","depth":5,"width":128,"label":"MQ 5\u00d7128","v6":"passed","sid_hit10_beam1":0.0576,"sid_hit10_beam64":0.1097,"sid_hit10_beam256":0.1415,"sid_hit10_beam256_lo":0.1332,"sid_hit10_beam256_hi":0.1501,"state0_catalogue_sid_hit10":0.0845,"state0_catalogue_sid_hit10_lo":0.0777,"state0_catalogue_sid_hit10_hi":0.0916,"greedy_first_is_digit1":0.1804,"greedy_modal_order_share":0.044,"greedy_states_in_trained_family":0.0876,"greedy_sid_settled_at_state0":0.112,"top1_sid_settled_at_state0":0.0872,"beam256_final_duplicate_share":0.9267,"beam256_final_unreachable_share":0.1401,"regret_any_digit":0.0807,"regret_any_digit_lo":0.074,"regret_any_digit_hi":0.0878,"state0_confidence_minus_accuracy":0.111,"state0_confidence_minus_accuracy_lo":0.1053,"state0_confidence_minus_accuracy_hi":0.1168,"state0_top1_accuracy":0.1583,"state0_mean_max_probability":0.2692,"target_best_order_differs_from_greedy":0.9544,"target_best_minus_greedy_order_score":1.4935,"top1_found":1.0,"modal_order":"31542","state0_item_hit10_lo":0.0627,"state0_item_hit10_hi":0.0688},{"id":"diff-next1-rqkmeans-3cb-128","q":"rqkmeans","depth":3,"width":128,"label":"RQ-KMeans 3\u00d7128","v6":"passed","sid_hit10_beam1":0.0985,"sid_hit10_beam64":0.2033,"sid_hit10_beam256":0.2034,"sid_hit10_beam256_lo":0.1937,"sid_hit10_beam256_hi":0.2131,"state0_catalogue_sid_hit10":0.1629,"state0_catalogue_sid_hit10_lo":0.1537,"state0_catalogue_sid_hit10_hi":0.1721,"greedy_first_is_digit1":0.3381,"greedy_modal_order_share":0.273,"greedy_states_in_trained_family":0.6136,"greedy_sid_settled_at_state0":0.266,"top1_sid_settled_at_state0":0.2805,"beam256_final_duplicate_share":0.5536,"beam256_final_unreachable_share":0.2526,"regret_any_digit":0.0557,"regret_any_digit_lo":0.0502,"regret_any_digit_hi":0.0616,"state0_confidence_minus_accuracy":0.0718,"state0_confidence_minus_accuracy_lo":0.0654,"state0_confidence_minus_accuracy_hi":0.0783,"state0_top1_accuracy":0.1919,"state0_mean_max_probability":0.2638,"target_best_order_differs_from_greedy":0.7291,"target_best_minus_greedy_order_score":0.8479,"top1_found":1.0,"modal_order":"231","state0_item_hit10_lo":0.1005,"state0_item_hit10_hi":0.1261},{"id":"diff-next1-rqkmeans-4cb-128","q":"rqkmeans","depth":4,"width":128,"label":"RQ-KMeans 4\u00d7128","v6":"passed","sid_hit10_beam1":0.085,"sid_hit10_beam64":0.1617,"sid_hit10_beam256":0.1785,"sid_hit10_beam256_lo":0.1694,"sid_hit10_beam256_hi":0.1883,"state0_catalogue_sid_hit10":0.1517,"state0_catalogue_sid_hit10_lo":0.1428,"state0_catalogue_sid_hit10_hi":0.1606,"greedy_first_is_digit1":0.3003,"greedy_modal_order_share":0.104,"greedy_states_in_trained_family":0.4346,"greedy_sid_settled_at_state0":0.2003,"top1_sid_settled_at_state0":0.2152,"beam256_final_duplicate_share":0.7603,"beam256_final_unreachable_share":0.3505,"regret_any_digit":0.0832,"regret_any_digit_lo":0.0764,"regret_any_digit_hi":0.09,"state0_confidence_minus_accuracy":0.1028,"state0_confidence_minus_accuracy_lo":0.0966,"state0_confidence_minus_accuracy_hi":0.1089,"state0_top1_accuracy":0.1831,"state0_mean_max_probability":0.2859,"target_best_order_differs_from_greedy":0.9335,"target_best_minus_greedy_order_score":2.3419,"top1_found":1.0,"modal_order":"1234","state0_item_hit10_lo":0.1086,"state0_item_hit10_hi":0.1272},{"id":"diff-next1-rqkmeans-4cb-512","q":"rqkmeans","depth":4,"width":512,"label":"RQ-KMeans 4\u00d7512","v6":"passed","sid_hit10_beam1":0.0662,"sid_hit10_beam64":0.1323,"sid_hit10_beam256":0.1421,"sid_hit10_beam256_lo":0.1342,"sid_hit10_beam256_hi":0.1509,"state0_catalogue_sid_hit10":0.1366,"state0_catalogue_sid_hit10_lo":0.1282,"state0_catalogue_sid_hit10_hi":0.1451,"greedy_first_is_digit1":0.2903,"greedy_modal_order_share":0.1002,"greedy_states_in_trained_family":0.4399,"greedy_sid_settled_at_state0":0.1782,"top1_sid_settled_at_state0":0.1949,"beam256_final_duplicate_share":0.8191,"beam256_final_unreachable_share":0.1954,"regret_any_digit":0.0278,"regret_any_digit_lo":0.0238,"regret_any_digit_hi":0.0318,"state0_confidence_minus_accuracy":0.1421,"state0_confidence_minus_accuracy_lo":0.1359,"state0_confidence_minus_accuracy_hi":0.1479,"state0_top1_accuracy":0.1302,"state0_mean_max_probability":0.2723,"target_best_order_differs_from_greedy":0.8685,"target_best_minus_greedy_order_score":2.0894,"top1_found":1.0,"modal_order":"2341","state0_item_hit10_lo":0.1204,"state0_item_hit10_hi":0.124},{"id":"diff-next1-rqkmeans-5cb-128","q":"rqkmeans","depth":5,"width":128,"label":"RQ-KMeans 5\u00d7128","v6":"passed","sid_hit10_beam1":0.0635,"sid_hit10_beam64":0.1228,"sid_hit10_beam256":0.1566,"sid_hit10_beam256_lo":0.1482,"sid_hit10_beam256_hi":0.1656,"state0_catalogue_sid_hit10":0.1167,"state0_catalogue_sid_hit10_lo":0.1091,"state0_catalogue_sid_hit10_hi":0.1245,"greedy_first_is_digit1":0.4024,"greedy_modal_order_share":0.0441,"greedy_states_in_trained_family":0.0723,"greedy_sid_settled_at_state0":0.0548,"top1_sid_settled_at_state0":0.058,"beam256_final_duplicate_share":0.9206,"beam256_final_unreachable_share":0.0978,"regret_any_digit":0.0213,"regret_any_digit_lo":0.0178,"regret_any_digit_hi":0.0249,"state0_confidence_minus_accuracy":0.1264,"state0_confidence_minus_accuracy_lo":0.1213,"state0_confidence_minus_accuracy_hi":0.1311,"state0_top1_accuracy":0.1378,"state0_mean_max_probability":0.2642,"target_best_order_differs_from_greedy":0.9411,"target_best_minus_greedy_order_score":2.1924,"top1_found":0.9998,"modal_order":"12543","state0_item_hit10_lo":0.0966,"state0_item_hit10_hi":0.107},{"id":"diff-next1-rqkmeans-5cb-512","q":"rqkmeans","depth":5,"width":512,"label":"RQ-KMeans 5\u00d7512","v6":"passed","sid_hit10_beam1":0.0543,"sid_hit10_beam64":0.0689,"sid_hit10_beam256":0.0867,"sid_hit10_beam256_lo":0.0799,"sid_hit10_beam256_hi":0.0937,"state0_catalogue_sid_hit10":0.075,"state0_catalogue_sid_hit10_lo":0.0689,"state0_catalogue_sid_hit10_hi":0.0815,"greedy_first_is_digit1":0.2962,"greedy_modal_order_share":0.0634,"greedy_states_in_trained_family":0.1158,"greedy_sid_settled_at_state0":0.1016,"top1_sid_settled_at_state0":0.1027,"beam256_final_duplicate_share":0.9511,"beam256_final_unreachable_share":0.0265,"regret_any_digit":0.0005,"regret_any_digit_lo":0.0,"regret_any_digit_hi":0.0011,"state0_confidence_minus_accuracy":0.0921,"state0_confidence_minus_accuracy_lo":0.0875,"state0_confidence_minus_accuracy_hi":0.0962,"state0_top1_accuracy":0.0596,"state0_mean_max_probability":0.1516,"target_best_order_differs_from_greedy":0.9068,"target_best_minus_greedy_order_score":1.0999,"top1_found":1.0,"modal_order":"13254","state0_item_hit10_lo":0.075,"state0_item_hit10_hi":0.075},{"id":"diff-next1-rqvae-3cb-128","q":"rqvae","depth":3,"width":128,"label":"RQ-VAE 3\u00d7128","v6":"passed","sid_hit10_beam1":0.0708,"sid_hit10_beam64":0.132,"sid_hit10_beam256":0.132,"sid_hit10_beam256_lo":0.1239,"sid_hit10_beam256_hi":0.1401,"state0_catalogue_sid_hit10":0.1196,"state0_catalogue_sid_hit10_lo":0.1121,"state0_catalogue_sid_hit10_hi":0.1275,"greedy_first_is_digit1":0.454,"greedy_modal_order_share":0.3179,"greedy_states_in_trained_family":0.5246,"greedy_sid_settled_at_state0":0.1952,"top1_sid_settled_at_state0":0.2058,"beam256_final_duplicate_share":0.5559,"beam256_final_unreachable_share":0.3227,"regret_any_digit":0.0543,"regret_any_digit_lo":0.0488,"regret_any_digit_hi":0.0602,"state0_confidence_minus_accuracy":0.1445,"state0_confidence_minus_accuracy_lo":0.1385,"state0_confidence_minus_accuracy_hi":0.1498,"state0_top1_accuracy":0.1186,"state0_mean_max_probability":0.263,"target_best_order_differs_from_greedy":0.6819,"target_best_minus_greedy_order_score":0.836,"top1_found":1.0,"modal_order":"123","state0_item_hit10_lo":0.1164,"state0_item_hit10_hi":0.1178},{"id":"diff-next1-rqvae-3cb-512","q":"rqvae","depth":3,"width":512,"label":"RQ-VAE 3\u00d7512","v6":"passed","sid_hit10_beam1":0.0738,"sid_hit10_beam64":0.1372,"sid_hit10_beam256":0.1372,"sid_hit10_beam256_lo":0.129,"sid_hit10_beam256_hi":0.1456,"state0_catalogue_sid_hit10":0.1334,"state0_catalogue_sid_hit10_lo":0.1255,"state0_catalogue_sid_hit10_hi":0.1418,"greedy_first_is_digit1":0.8085,"greedy_modal_order_share":0.5841,"greedy_states_in_trained_family":0.7443,"greedy_sid_settled_at_state0":0.2176,"top1_sid_settled_at_state0":0.2317,"beam256_final_duplicate_share":0.5734,"beam256_final_unreachable_share":0.2087,"regret_any_digit":0.0546,"regret_any_digit_lo":0.0491,"regret_any_digit_hi":0.0605,"state0_confidence_minus_accuracy":0.1063,"state0_confidence_minus_accuracy_lo":0.1002,"state0_confidence_minus_accuracy_hi":0.1121,"state0_top1_accuracy":0.1479,"state0_mean_max_probability":0.2542,"target_best_order_differs_from_greedy":0.6552,"target_best_minus_greedy_order_score":0.7401,"top1_found":1.0,"modal_order":"123","state0_item_hit10_lo":0.1326,"state0_item_hit10_hi":0.1328},{"id":"diff-next1-rqvae-4cb-128","q":"rqvae","depth":4,"width":128,"label":"RQ-VAE 4\u00d7128","v6":"passed","sid_hit10_beam1":0.0692,"sid_hit10_beam64":0.128,"sid_hit10_beam256":0.135,"sid_hit10_beam256_lo":0.1274,"sid_hit10_beam256_hi":0.1434,"state0_catalogue_sid_hit10":0.1255,"state0_catalogue_sid_hit10_lo":0.1174,"state0_catalogue_sid_hit10_hi":0.1336,"greedy_first_is_digit1":0.6095,"greedy_modal_order_share":0.229,"greedy_states_in_trained_family":0.515,"greedy_sid_settled_at_state0":0.1518,"top1_sid_settled_at_state0":0.1612,"beam256_final_duplicate_share":0.6815,"beam256_final_unreachable_share":0.3548,"regret_any_digit":0.139,"regret_any_digit_lo":0.1305,"regret_any_digit_hi":0.1477,"state0_confidence_minus_accuracy":0.0844,"state0_confidence_minus_accuracy_lo":0.0788,"state0_confidence_minus_accuracy_hi":0.0897,"state0_top1_accuracy":0.1457,"state0_mean_max_probability":0.2301,"target_best_order_differs_from_greedy":0.7945,"target_best_minus_greedy_order_score":1.6525,"top1_found":0.9998,"modal_order":"1234","state0_item_hit10_lo":0.125,"state0_item_hit10_hi":0.125},{"id":"diff-next1-rqvae-5cb-128","q":"rqvae","depth":5,"width":128,"label":"RQ-VAE 5\u00d7128","v6":"passed","sid_hit10_beam1":0.0453,"sid_hit10_beam64":0.0913,"sid_hit10_beam256":0.111,"sid_hit10_beam256_lo":0.1037,"sid_hit10_beam256_hi":0.1189,"state0_catalogue_sid_hit10":0.094,"state0_catalogue_sid_hit10_lo":0.0872,"state0_catalogue_sid_hit10_hi":0.101,"greedy_first_is_digit1":0.4456,"greedy_modal_order_share":0.0661,"greedy_states_in_trained_family":0.1304,"greedy_sid_settled_at_state0":0.0667,"top1_sid_settled_at_state0":0.0766,"beam256_final_duplicate_share":0.8901,"beam256_final_unreachable_share":0.1806,"regret_any_digit":0.0581,"regret_any_digit_lo":0.0529,"regret_any_digit_hi":0.0639,"state0_confidence_minus_accuracy":0.1902,"state0_confidence_minus_accuracy_lo":0.1855,"state0_confidence_minus_accuracy_hi":0.195,"state0_top1_accuracy":0.1122,"state0_mean_max_probability":0.3024,"target_best_order_differs_from_greedy":0.913,"target_best_minus_greedy_order_score":2.4342,"top1_found":0.9997,"modal_order":"12435","state0_item_hit10_lo":0.0934,"state0_item_hit10_hi":0.0939},{"id":"diff-next1-MQ-5cb-256","q":"MQ","depth":5,"width":256,"label":"MQ 5\u00d7256","v6":"not checked","sid_hit10_beam1":0.0354,"sid_hit10_beam64":0.1018,"sid_hit10_beam256":0.1334,"sid_hit10_beam256_lo":0.1253,"sid_hit10_beam256_hi":0.1421,"state0_catalogue_sid_hit10":0.0678,"state0_catalogue_sid_hit10_lo":0.0618,"state0_catalogue_sid_hit10_hi":0.074,"greedy_first_is_digit1":0.1718,"greedy_modal_order_share":0.0481,"greedy_states_in_trained_family":0.1684,"greedy_sid_settled_at_state0":0.0181,"top1_sid_settled_at_state0":0.017,"beam256_final_duplicate_share":0.9334,"beam256_final_unreachable_share":0.0915,"regret_any_digit":0.0573,"regret_any_digit_lo":0.0518,"regret_any_digit_hi":0.063,"state0_confidence_minus_accuracy":0.0871,"state0_confidence_minus_accuracy_lo":0.0829,"state0_confidence_minus_accuracy_hi":0.0913,"state0_top1_accuracy":0.0911,"state0_mean_max_probability":0.1782,"target_best_order_differs_from_greedy":0.9473,"target_best_minus_greedy_order_score":1.6521,"top1_found":1.0,"modal_order":"43125","state0_item_hit10_lo":0.0554,"state0_item_hit10_hi":0.0596},{"id":"diff-next1-rqvae-3cb-256","q":"rqvae","depth":3,"width":256,"label":"RQ-VAE 3\u00d7256","v6":"not checked","sid_hit10_beam1":0.07,"sid_hit10_beam64":0.1288,"sid_hit10_beam256":0.1288,"sid_hit10_beam256_lo":0.121,"sid_hit10_beam256_hi":0.1372,"state0_catalogue_sid_hit10":0.1185,"state0_catalogue_sid_hit10_lo":0.1108,"state0_catalogue_sid_hit10_hi":0.1267,"greedy_first_is_digit1":0.6554,"greedy_modal_order_share":0.4991,"greedy_states_in_trained_family":0.6006,"greedy_sid_settled_at_state0":0.2036,"top1_sid_settled_at_state0":0.213,"beam256_final_duplicate_share":0.5681,"beam256_final_unreachable_share":0.2597,"regret_any_digit":0.053,"regret_any_digit_lo":0.0476,"regret_any_digit_hi":0.0588,"state0_confidence_minus_accuracy":0.1271,"state0_confidence_minus_accuracy_lo":0.1216,"state0_confidence_minus_accuracy_hi":0.1326,"state0_top1_accuracy":0.1251,"state0_mean_max_probability":0.2522,"target_best_order_differs_from_greedy":0.6919,"target_best_minus_greedy_order_score":0.8641,"top1_found":1.0,"modal_order":"123","state0_item_hit10_lo":0.1159,"state0_item_hit10_hi":0.1166}],"first":{"diff-next1-MQ-3cb-128":[0.2868,0.2995,0.4137],"diff-next1-MQ-3cb-512":[0.2936,0.3684,0.3379],"diff-next1-MQ-4cb-128":[0.2292,0.3027,0.2547,0.2134],"diff-next1-MQ-4cb-512":[0.2658,0.2219,0.2584,0.2539],"diff-next1-MQ-5cb-128":[0.1804,0.1424,0.2908,0.1631,0.2233],"diff-next1-MQ-5cb-256":[0.1718,0.1466,0.1926,0.3081,0.1809],"diff-next1-rqkmeans-3cb-128":[0.3381,0.4847,0.1772],"diff-next1-rqkmeans-4cb-128":[0.3003,0.3565,0.2417,0.1015],"diff-next1-rqkmeans-4cb-512":[0.2903,0.3068,0.1556,0.2473],"diff-next1-rqkmeans-5cb-128":[0.4024,0.2068,0.1631,0.1648,0.0629],"diff-next1-rqkmeans-5cb-512":[0.2962,0.2101,0.2512,0.0808,0.1617],"diff-next1-rqvae-3cb-128":[0.454,0.3009,0.245],"diff-next1-rqvae-3cb-256":[0.6554,0.1977,0.1469],"diff-next1-rqvae-3cb-512":[0.8085,0.1129,0.0786],"diff-next1-rqvae-4cb-128":[0.6095,0.1453,0.1321,0.1131],"diff-next1-rqvae-5cb-128":[0.4456,0.1929,0.1261,0.1328,0.1026]},"family_by_depth":{"3":[1.0,0.4355,0.3756],"4":[1.0,0.3198,0.1729,0.2513],"5":[0.0,0.2143,0.0951,0.0928,0.1724]},"guess_by_depth":{"3":{"final":[0.3121,0.6033,1.0],"legal":[0.4274,0.6915,0.9543]},"4":{"final":[0.2395,0.4843,0.7536,1.0],"legal":[0.3316,0.5674,0.747,0.8545]},"5":{"final":[0.0859,0.3844,0.6185,0.8392,1.0],"legal":[0.1399,0.4542,0.6456,0.7854,0.84]}},"beam_by_depth":{"1":{"3":{"dup":[0.0,0.0,0.0],"dead":[0.0,0.0006,0.0457]},"4":{"dup":[0.0,0.0,0.0,0.0],"dead":[0.0,0.0035,0.0678,0.1455]},"5":{"dup":[0.0,0.0,0.0,0.0,0.0],"dead":[0.0,0.0006,0.0391,0.0928,0.16]}},"64":{"3":{"dup":[0.0,0.2716,0.5622],"dead":[0.0,0.0261,0.1454]},"4":{"dup":[0.0,0.262,0.587,0.7914],"dead":[0.0,0.0307,0.0791,0.1405]},"5":{"dup":[0.0,0.1928,0.525,0.7777,0.9088],"dead":[0.0,0.0061,0.0348,0.0326,0.0601]}},"256":{"3":{"dup":[0.0,0.2753,0.575],"dead":[0.0049,0.0646,0.2366]},"4":{"dup":[0.0,0.2546,0.578,0.7918],"dead":[0.0005,0.0707,0.167,0.2479]},"5":{"dup":[0.0,0.2059,0.5422,0.8087,0.9244],"dead":[0.003,0.0187,0.0802,0.0732,0.1073]}}},"blocks_by_q":{"MQ":{"agree":[0.573,0.6952,0.815,1.0],"logp":[-4.9288,-5.0117,-5.1195,-5.1489],"lo":[0.4651,0.6048,0.7574,1.0],"hi":[0.7099,0.8055,0.8699,1.0]},"rqkmeans":{"agree":[0.4699,0.6482,0.7903,1.0],"logp":[-4.99,-5.0931,-5.257,-5.3366],"lo":[0.4144,0.5993,0.7606,1.0],"hi":[0.556,0.7404,0.8566,1.0]},"rqvae":{"agree":[0.3906,0.58,0.7408,1.0],"logp":[-5.1322,-5.2682,-5.3987,-5.4659],"lo":[0.3562,0.5574,0.7278,1.0],"hi":[0.4428,0.59,0.7483,1.0]}},"blocks":{"diff-next1-MQ-3cb-128":[0.7099,0.8055,0.8699,1.0],"diff-next1-MQ-3cb-512":[0.5091,0.6756,0.803,1.0],"diff-next1-MQ-4cb-128":[0.6061,0.6883,0.8257,1.0],"diff-next1-MQ-4cb-512":[0.5853,0.6854,0.8065,1.0],"diff-next1-MQ-5cb-128":[0.5625,0.7118,0.8273,1.0],"diff-next1-MQ-5cb-256":[0.4651,0.6048,0.7574,1.0],"diff-next1-rqkmeans-3cb-128":[0.4903,0.6548,0.7948,1.0],"diff-next1-rqkmeans-4cb-128":[0.4606,0.62,0.7637,1.0],"diff-next1-rqkmeans-4cb-512":[0.4283,0.6265,0.7758,1.0],"diff-next1-rqkmeans-5cb-128":[0.4144,0.5993,0.7606,1.0],"diff-next1-rqkmeans-5cb-512":[0.556,0.7404,0.8566,1.0],"diff-next1-rqvae-3cb-128":[0.4428,0.5833,0.7483,1.0],"diff-next1-rqvae-3cb-256":[0.3703,0.59,0.7373,1.0],"diff-next1-rqvae-3cb-512":[0.4141,0.5808,0.7432,1.0],"diff-next1-rqvae-4cb-128":[0.3562,0.5883,0.7473,1.0],"diff-next1-rqvae-5cb-128":[0.3697,0.5574,0.7278,1.0]},"gains":{"diff-next1-MQ-3cb-128":[[null,1.187,0.535],[1.259,null,0.684],[1.628,1.596,null]],"diff-next1-MQ-3cb-512":[[null,3.162,3.161],[3.135,null,3.137],[3.16,3.171,null]],"diff-next1-MQ-4cb-128":[[null,1.183,1.179,1.015],[1.497,null,1.472,1.207],[1.32,1.301,null,1.107],[1.705,1.684,1.686,null]],"diff-next1-MQ-4cb-512":[[null,3.179,3.062,3.158],[3.226,null,3.136,3.231],[3.294,3.338,null,3.298],[3.211,3.223,3.118,null]],"diff-next1-MQ-5cb-128":[[null,1.931,1.921,1.979,1.888],[2.101,null,2.07,2.101,2.075],[1.969,1.916,null,1.929,1.962],[1.974,1.955,1.88,null,1.954],[1.89,1.931,1.905,1.956,null]],"diff-next1-MQ-5cb-256":[[null,2.712,2.743,2.639,2.579],[2.648,null,2.826,2.651,2.619],[2.691,2.776,null,2.636,2.616],[2.832,2.816,2.88,null,2.624],[2.718,2.765,2.81,2.623,null]],"diff-next1-rqkmeans-3cb-128":[[null,0.652,1.008],[0.962,null,0.732],[1.112,0.498,null]],"diff-next1-rqkmeans-4cb-128":[[null,0.131,0.151,0.277],[0.91,null,0.657,0.622],[1.042,0.529,null,0.684],[1.139,0.628,1.033,null]],"diff-next1-rqkmeans-4cb-512":[[null,1.963,2.011,1.865],[2.745,null,2.319,2.298],[2.929,2.232,null,3.035],[2.576,1.999,2.565,null]],"diff-next1-rqkmeans-5cb-128":[[null,0.797,1.034,0.991,0.902],[1.21,null,0.833,0.846,0.792],[1.43,0.781,null,1.083,1.008],[1.49,0.839,1.193,null,1.2],[1.375,0.831,1.139,1.293,null]],"diff-next1-rqkmeans-5cb-512":[[null,4.024,3.643,3.792,3.819],[3.536,null,3.98,4.01,3.896],[3.389,4.273,null,4.125,4.074],[3.418,4.098,3.941,null,3.843],[3.431,4.017,3.942,3.847,null]],"diff-next1-rqvae-3cb-128":[[null,1.808,1.455],[1.665,null,1.364],[1.307,1.417,null]],"diff-next1-rqvae-3cb-256":[[null,1.979,1.405],[2.088,null,2.09],[1.277,2.038,null]],"diff-next1-rqvae-3cb-512":[[null,1.882,1.534],[1.757,null,3.234],[1.331,3.236,null]],"diff-next1-rqvae-4cb-128":[[null,1.045,0.925,0.805],[0.244,null,1.046,0.963],[0.176,1.093,null,1.049],[0.152,0.88,0.938,null]],"diff-next1-rqvae-5cb-128":[[null,0.962,0.814,0.745,0.6],[1.024,null,1.712,1.704,1.587],[0.797,1.719,null,1.806,1.687],[0.662,1.522,1.618,null,1.557],[0.54,1.563,1.648,1.701,null]]},"gain_mean":{"diff-next1-MQ-3cb-128":1.148,"diff-next1-MQ-3cb-512":3.154,"diff-next1-MQ-4cb-128":1.363,"diff-next1-MQ-4cb-512":3.206,"diff-next1-MQ-5cb-128":1.964,"diff-next1-MQ-5cb-256":2.71,"diff-next1-rqkmeans-3cb-128":0.827,"diff-next1-rqkmeans-4cb-128":0.65,"diff-next1-rqkmeans-4cb-512":2.378,"diff-next1-rqkmeans-5cb-128":1.053,"diff-next1-rqkmeans-5cb-512":3.855,"diff-next1-rqvae-3cb-128":1.503,"diff-next1-rqvae-3cb-256":1.813,"diff-next1-rqvae-3cb-512":2.162,"diff-next1-rqvae-4cb-128":0.776,"diff-next1-rqvae-5cb-128":1.298},"validation":{"passed":[{"cell":0,"label":"MQ 3\u00d7128","q":"MQ","v3":2.1457672119140625e-06,"v4":2.86102294921875e-06,"v6":"passed","seconds":81.7,"v6_score":3.337860107421875e-06},{"cell":1,"label":"MQ 3\u00d7512","q":"MQ","v3":3.814697265625e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":84.3,"v6_score":9.5367431640625e-06},{"cell":2,"label":"MQ 4\u00d7128","q":"MQ","v3":2.86102294921875e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":113.6,"v6_score":6.67572021484375e-06},{"cell":3,"label":"MQ 4\u00d7512","q":"MQ","v3":2.86102294921875e-06,"v4":5.7220458984375e-06,"v6":"passed","seconds":113.8,"v6_score":1.33514404296875e-05},{"cell":4,"label":"MQ 5\u00d7128","q":"MQ","v3":2.86102294921875e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":141.2,"v6_score":5.7220458984375e-06},{"cell":6,"label":"RQ-KMeans 3\u00d7128","q":"rqkmeans","v3":2.1457672119140625e-06,"v4":2.86102294921875e-06,"v6":"passed","seconds":84.4,"v6_score":4.291534423828125e-06},{"cell":8,"label":"RQ-KMeans 4\u00d7128","q":"rqkmeans","v3":2.86102294921875e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":114.5,"v6_score":6.67572021484375e-06},{"cell":9,"label":"RQ-KMeans 4\u00d7512","q":"rqkmeans","v3":3.337860107421875e-06,"v4":5.7220458984375e-06,"v6":"passed","seconds":115.3,"v6_score":1.0967254638671875e-05},{"cell":10,"label":"RQ-KMeans 5\u00d7128","q":"rqkmeans","v3":2.86102294921875e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":146.4,"v6_score":5.9604644775390625e-06},{"cell":11,"label":"RQ-KMeans 5\u00d7512","q":"rqkmeans","v3":4.76837158203125e-06,"v4":5.7220458984375e-06,"v6":"passed","seconds":149.1,"v6_score":8.106231689453125e-06},{"cell":12,"label":"RQ-VAE 3\u00d7128","q":"rqvae","v3":2.1457672119140625e-06,"v4":2.86102294921875e-06,"v6":"passed","seconds":85.6,"v6_score":1.0251998901367188e-05},{"cell":13,"label":"RQ-VAE 3\u00d7512","q":"rqvae","v3":3.337860107421875e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":85.8,"v6_score":9.298324584960938e-06},{"cell":14,"label":"RQ-VAE 4\u00d7128","q":"rqvae","v3":2.86102294921875e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":115.3,"v6_score":6.67572021484375e-06},{"cell":16,"label":"RQ-VAE 5\u00d7128","q":"rqvae","v3":3.337860107421875e-06,"v4":3.814697265625e-06,"v6":"passed","seconds":145.3,"v6_score":8.106231689453125e-06},{"cell":18,"label":"MQ 5\u00d7256","q":"MQ","v3":2.86102294921875e-06,"v4":3.814697265625e-06,"v6":"not checked","seconds":146.3,"v6_score":null},{"cell":19,"label":"RQ-VAE 3\u00d7256","q":"rqvae","v3":2.1457672119140625e-06,"v4":3.814697265625e-06,"v6":"not checked","seconds":83.7,"v6_score":null}],"failed":[{"cell":5,"label":"MQ 5\u00d7512","q":"MQ","archive_gpu":"NVIDIA RTX 5000 Ada Generation","gpu":"NVIDIA A100-SXM4-40GB","beams":{"64":{"users":0,"kinds":[],"spread":0.0,"rank_changed":0,"hit_here":0.05336,"hit_archive":0.05336,"score_diff":8.58306884765625e-06},"256":{"users":1,"kinds":["another SID at the list boundary"],"spread":0.0,"rank_changed":0,"hit_here":0.07781,"hit_archive":0.07781,"score_diff":7.62939453125e-06}}},{"cell":7,"label":"RQ-KMeans 3\u00d7512","q":"rqkmeans","archive_gpu":"NVIDIA RTX 5000 Ada Generation","gpu":"NVIDIA A100-SXM4-40GB","beams":{"64":{"users":2,"kinds":["same SIDs, other order"],"spread":1.6689300537109375e-06,"rank_changed":0,"hit_here":0.14483,"hit_archive":0.14483,"score_diff":9.5367431640625e-06},"256":{"users":2,"kinds":["same SIDs, other order"],"spread":1.6689300537109375e-06,"rank_changed":0,"hit_here":0.14483,"hit_archive":0.14483,"score_diff":1.0013580322265625e-05}}},{"cell":15,"label":"RQ-VAE 4\u00d7512","q":"rqvae","archive_gpu":"NVIDIA RTX 5000 Ada Generation","gpu":"NVIDIA A100-SXM4-40GB","beams":{"64":{"users":0,"kinds":[],"spread":0.0,"rank_changed":0,"hit_here":0.11958,"hit_archive":0.11958,"score_diff":1.0013580322265625e-05},"256":{"users":1,"kinds":["another SID at the list boundary"],"spread":4.76837158203125e-07,"rank_changed":0,"hit_here":0.12752,"hit_archive":0.12752,"score_diff":1.049041748046875e-05}}},{"cell":17,"label":"RQ-VAE 5\u00d7512","q":"rqvae","archive_gpu":"NVIDIA RTX 5000 Ada Generation","gpu":"NVIDIA A100-SXM4-40GB","beams":{"64":{"users":0,"kinds":[],"spread":0.0,"rank_changed":0,"hit_here":0.09449,"hit_archive":0.09449,"score_diff":8.58306884765625e-06},"256":{"users":1,"kinds":["same SIDs, other order"],"spread":0.0,"rank_changed":0,"hit_here":0.11609,"hit_archive":0.11609,"score_diff":1.0728836059570312e-05}}}]},"examples":{"cell":"RQ-VAE 4\u00d7128","n":4,"K":128,"rows":[{"kind":"Hit after the guess changed","user_row":34,"history_length":6,"target":[92,99,78,0],"target_item":{"title":"Ancor Tinned Copper Lugs 8 AWG - 4/0 AWG","cat":"Ring Terminals"},"last":[92,99,78,0],"last_item":{"title":"Ancor Tinned Copper Lugs 8 AWG - 4/0 AWG","cat":"Ring Terminals"},"last_bucket":2,"final":[92,99,78,0],"final_item":{"title":"Ancor Tinned Copper Lugs 8 AWG - 4/0 AWG","cat":"Ring Terminals"},"final_bucket":2,"final_is_last":true,"target_is_last":true,"beam_rank":1,"states":[{"digits":[{"revealed":false,"code":92,"p":0.147,"target_rank":1},{"revealed":false,"code":122,"p":0.174,"target_rank":2},{"revealed":false,"code":78,"p":0.205,"target_rank":1},{"revealed":false,"code":0,"p":0.12,"target_rank":1}],"commit_digit":0,"commit_code":92,"guess_legal":false,"target_reachable":true,"catalogue_rank":1},{"digits":[{"revealed":true,"code":92},{"revealed":false,"code":99,"p":0.678,"target_rank":1},{"revealed":false,"code":78,"p":0.886,"target_rank":1},{"revealed":false,"code":0,"p":0.494,"target_rank":1}],"commit_digit":2,"commit_code":78,"guess_legal":true,"target_reachable":true,"catalogue_rank":1},{"digits":[{"revealed":true,"code":92},{"revealed":false,"code":99,"p":0.859,"target_rank":1},{"revealed":true,"code":78},{"revealed":false,"code":0,"p":0.879,"target_rank":1}],"commit_digit":3,"commit_code":0,"guess_legal":true,"target_reachable":true,"catalogue_rank":1},{"digits":[{"revealed":true,"code":92},{"revealed":false,"code":99,"p":0.849,"target_rank":1},{"revealed":true,"code":78},{"revealed":true,"code":0}],"commit_digit":1,"commit_code":99,"guess_legal":true,"target_reachable":true,"catalogue_rank":1}]},{"kind":"Hit that never changed","user_row":51,"history_length":5,"target":[48,13,101,0],"target_item":{"title":"AcuRite 00613 Humidity Monitor with Indoor Thermometer, Digital Hygrometer and Humidity Ga","cat":"Temperature & Humidity"},"last":[48,13,101,0],"last_item":{"title":"AcuRite 00613 Humidity Monitor with Indoor Thermometer, Digital Hygrometer and Humidity Ga","cat":"Temperature & Humidity"},"last_bucket":2,"final":[48,13,101,0],"final_item":{"title":"AcuRite 00613 Humidity Monitor with Indoor Thermometer, Digital Hygrometer and Humidity Ga","cat":"Temperature & Humidity"},"final_bucket":2,"final_is_last":true,"target_is_last":true,"beam_rank":1,"states":[{"digits":[{"revealed":false,"code":48,"p":0.421,"target_rank":1},{"revealed":false,"code":13,"p":0.545,"target_rank":1},{"revealed":false,"code":101,"p":0.582,"target_rank":1},{"revealed":false,"code":0,"p":0.514,"target_rank":1}],"commit_digit":0,"commit_code":48,"guess_legal":true,"target_reachable":true,"catalogue_rank":1},{"digits":[{"revealed":true,"code":48},{"revealed":false,"code":13,"p":0.826,"target_rank":1},{"revealed":false,"code":101,"p":0.826,"target_rank":1},{"revealed":false,"code":0,"p":0.801,"target_rank":1}],"commit_digit":3,"commit_code":0,"guess_legal":true,"target_reachable":true,"catalogue_rank":1},{"digits":[{"revealed":true,"code":48},{"revealed":false,"code":13,"p":0.894,"target_rank":1},{"revealed":false,"code":101,"p":0.905,"target_rank":1},{"revealed":true,"code":0}],"commit_digit":2,"commit_code":101,"guess_legal":true,"target_reachable":true,"catalogue_rank":1},{"digits":[{"revealed":true,"code":48},{"revealed":false,"code":13,"p":0.914,"target_rank":1},{"revealed":true,"code":101},{"revealed":true,"code":0}],"commit_digit":1,"commit_code":13,"guess_legal":true,"target_reachable":true,"catalogue_rank":1}]},{"kind":"Miss","user_row":0,"history_length":7,"target":[12,6,124,0],"target_item":{"title":"UltraSource 192033 Hamburger Patty Paper, 5.5\" x 5.5\" (Pack of 1000)","cat":"Butcher & Freezer Paper"},"last":[12,6,124,0],"last_item":{"title":"UltraSource 192033 Hamburger Patty Paper, 5.5\" x 5.5\" (Pack of 1000)","cat":"Butcher & Freezer Paper"},"last_bucket":2,"final":[48,13,101,0],"final_item":{"title":"AcuRite 00613 Humidity Monitor with Indoor Thermometer, Digital Hygrometer and Humidity Ga","cat":"Temperature & Humidity"},"final_bucket":2,"final_is_last":false,"target_is_last":true,"beam_rank":0,"states":[{"digits":[{"revealed":false,"code":118,"p":0.091,"target_rank":22},{"revealed":false,"code":106,"p":0.077,"target_rank":9},{"revealed":false,"code":20,"p":0.09,"target_rank":17},{"revealed":false,"code":0,"p":0.271,"target_rank":1}],"commit_digit":3,"commit_code":0,"guess_legal":false,"target_reachable":true,"catalogue_rank":18},{"digits":[{"revealed":false,"code":48,"p":0.212,"target_rank":14},{"revealed":false,"code":13,"p":0.33,"target_rank":12},{"revealed":false,"code":101,"p":0.309,"target_rank":5},{"revealed":true,"code":0}],"commit_digit":0,"commit_code":48,"guess_legal":true,"target_reachable":true,"catalogue_rank":5},{"digits":[{"revealed":true,"code":48},{"revealed":false,"code":13,"p":0.915,"target_rank":23},{"revealed":false,"code":101,"p":0.921,"target_rank":18},{"revealed":true,"code":0}],"commit_digit":2,"commit_code":101,"guess_legal":true,"target_reachable":false,"catalogue_rank":3},{"digits":[{"revealed":true,"code":48},{"revealed":false,"code":13,"p":0.922,"target_rank":20},{"revealed":true,"code":101},{"revealed":true,"code":0}],"commit_digit":1,"commit_code":13,"guess_legal":true,"target_reachable":false,"catalogue_rank":2}]}]},"expectations":{"note":"expectations need all 20 cells"},"users":6297,"seconds_total":1806.0,"sources":[{"path":"derived/representation/exp4_diffusion_reveal_trace/summary-310761-16cells/per_cell.csv","sha256":"cda3035b4426b377"},{"path":"derived/representation/exp4_diffusion_reveal_trace/summary-310761-16cells/by_step.csv","sha256":"f2ec1ad10096a2a5"},{"path":"derived/representation/exp4_diffusion_reveal_trace/summary-310761-16cells/first.csv","sha256":"f12ecc2c39df8faa"},{"path":"derived/representation/exp4_diffusion_reveal_trace/summary-310761-16cells/beam.csv","sha256":"a54b5d843d10e225"},{"path":"derived/representation/exp4_diffusion_reveal_trace/summary-310761-16cells/blocks.csv","sha256":"6e3e816999b7c79c"},{"path":"derived/representation/exp4_diffusion_reveal_trace/summary-310761-16cells/gains.csv","sha256":"59e4df51fa99aa7b"},{"path":"derived/representation/exp4_diffusion_reveal_trace/310761.v6-diagnosis/cell-05/archive_diff.json","sha256":"b56af96a192284ec"},{"path":"derived/representation/exp4_diffusion_reveal_trace/310761.v6-diagnosis/cell-07/archive_diff.json","sha256":"bfbcdf28eacb7416"},{"path":"derived/representation/exp4_diffusion_reveal_trace/310761.v6-diagnosis/cell-15/archive_diff.json","sha256":"7ed3cb20a6ec22c0"},{"path":"derived/representation/exp4_diffusion_reveal_trace/310761.v6-diagnosis/cell-17/archive_diff.json","sha256":"ec57556f9a15e4d7"},{"path":"derived/representation/exp4_diffusion_reveal_trace/310761/cell-14/trace.npz","sha256":"043055673b0ea0e1"}]};
+const NS = "http://www.w3.org/2000/svg";
+const MCOL = { rqkmeans_3codebook_128: "var(--s-rqk)", rqvae_4codebook_128: "var(--s-rqvae)" };
+const QCOL = { rqkmeans: "var(--s-rqk)", rqvae: "var(--s-rqvae)", MQ: "var(--s-mq)" };
+const QLAB = { rqkmeans: "RQ-KMeans", rqvae: "RQ-VAE", MQ: "MQ" };
+const QORD = ["rqkmeans", "rqvae", "MQ"];
+
+function h(tag, attrs = {}, parent, text) {
+  const e = document.createElement(tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function s(tag, attrs = {}, parent, style) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (style) Object.assign(e.style, style);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent, x, y, str, attrs = {}) { const t = s("text", { x, y, ...attrs }, parent); t.textContent = str; return t; }
+function lin(d0, d1, r0, r1) { const f = v => r0 + (v - d0) / (d1 - d0) * (r1 - r0); f.inv = p => d0 + (p - r0) / (r1 - r0) * (d1 - d0); return f; }
+function ticks(a, b, n = 5) {
+  const st0 = (b - a) / n, mag = 10 ** Math.floor(Math.log10(st0)), e = st0 / mag;
+  const st = (e >= 7.5 ? 10 : e >= 3.5 ? 5 : e >= 1.5 ? 2 : 1) * mag, out = [];
+  for (let v = Math.ceil(a / st - 1e-9) * st; v <= b + 1e-9; v += st) out.push(+v.toFixed(10));
+  return out;
+}
+const f2 = v => v == null ? "–" : (+v).toFixed(2), f3 = v => v == null ? "–" : (+v).toFixed(3), f1 = v => v == null ? "–" : (+v).toFixed(1);
+const pct = v => v == null ? "–" : (100 * v).toFixed(1) + "%";
+const sgn = (v, d = 2) => v == null ? "–" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(d);
+
+function legend(id, items) {
+  const el = document.getElementById(id); el.textContent = "";
+  for (const it of items) {
+    const sp = h("span", {}, el); const k = h("i", { class: "key " + it.kind }, sp); k.style.setProperty("--c", it.color);
+    sp.appendChild(document.createTextNode(it.label));
+  }
+}
+function table(id, head, rows, right = []) {
+  const wrap = document.getElementById(id); wrap.textContent = "";
+  const t = h("table", {}, wrap), tr = h("tr", {}, h("thead", {}, t)), tb = h("tbody", {}, t);
+  head.forEach((c, i) => h("th", right.includes(i) ? { class: "r" } : {}, tr, c));
+  rows.forEach(r => { const x = h("tr", {}, tb); r.forEach((c, i) => h("td", right.includes(i) ? { class: "r" } : {}, x, c)); });
+}
+
+/* one tooltip per viz host */
+function tipper(host) {
+  let tip = host.querySelector(".tip");
+  if (!tip) { tip = h("div", { class: "tip", role: "status" }, host); tip.hidden = true; }
+  return {
+    show(head, rows, px, py) {
+      tip.textContent = ""; h("div", { class: "h" }, tip, head);
+      for (const r of rows) {
+        const d = h("div", { class: "r" }, tip);
+        if (r.color) { const k = h("i", { class: "key " + (r.kind || "line") }, d); k.style.setProperty("--c", r.color); }
+        h("b", {}, d, r.value); if (r.name) h("span", { class: "n" }, d, r.name);
+      }
+      tip.hidden = false;
+      const W = host.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+      let x = px + 14; if (x + tw > W) x = Math.max(0, px - tw - 14);
+      let y = py - th - 10; if (y < 0) y = py + 14;
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    },
+    hide() { tip.hidden = true; }
+  };
+}
+const renders = [];
+function responsive(host, draw) {
+  let w = 0;
+  const go = () => { const nw = host.clientWidth; if (nw && nw !== w) { w = nw; draw(nw); } };
+  new ResizeObserver(go).observe(host); go();
+}
+
+/* line chart: series [{name,color,dash,width,points:[{x,y,lo,hi}],band}], refs [{y,color,dash,label}] */
+function lineChart(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const H = o.h || 250, m = { l: 46, r: o.endLabels ? 104 : 14, t: o.title ? 26 : 10, b: 36 };
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || o.title || "line chart" });
+    host.prepend(svg);
+    const allx = [...new Set(o.series.flatMap(se => se.points.map(p => p.x)))].sort((a, b) => a - b);
+    const x = lin(o.x ? o.x[0] : allx[0], o.x ? o.x[1] : allx[allx.length - 1], m.l, W - m.r);
+    const y = lin(o.y[0], o.y[1], H - m.b, m.t);
+    if (o.title) txt(svg, m.l, 15, o.title, { class: "title" });
+    for (const t of ticks(o.y[0], o.y[1], o.yTicks || 5)) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }, svg, { stroke: "var(--grid)", strokeWidth: 1 });
+      txt(svg, m.l - 7, y(t) + 4, o.yFmt ? o.yFmt(t) : t, { "text-anchor": "end" });
+    }
+    for (const t of ticks(x.inv(m.l), x.inv(W - m.r), Math.max(3, Math.floor((W - m.l - m.r) / 70)))) {
+      if (!Number.isInteger(t)) continue;
+      txt(svg, x(t), H - m.b + 16, t, { "text-anchor": "middle" });
+    }
+    s("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b }, svg, { stroke: "var(--axis)", strokeWidth: 1 });
+    if (o.xLabel) txt(svg, (m.l + W - m.r) / 2, H - 4, o.xLabel, { "text-anchor": "middle" });
+    if (o.yLabel) txt(svg, 12, (m.t + H - m.b) / 2, o.yLabel, { "text-anchor": "middle", transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` });
+    for (const r of o.refs || []) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(r.y), y2: y(r.y) }, svg, { stroke: r.color, strokeWidth: r.width || 1.4, strokeDasharray: r.dash || "2 3" });
+    }
+    for (const se of o.series) {
+      const pts = se.points.filter(p => p.y != null);
+      if (se.band && pts.every(p => p.lo != null)) {
+        const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p.x)},${y(p.hi)}`).join("") + pts.slice().reverse().map(p => `L${x(p.x)},${y(p.lo)}`).join("") + "Z";
+        s("path", { d }, svg, { fill: se.color, fillOpacity: "var(--band-op)", stroke: "none" });
+      }
+      s("path", { d: pts.map((p, i) => `${i ? "L" : "M"}${x(p.x)},${y(p.y)}`).join("") }, svg,
+        { fill: "none", stroke: se.color, strokeWidth: se.width || 2, strokeDasharray: se.dash || "", strokeLinejoin: "round", strokeLinecap: "round" });
+    }
+    if (o.endLabels) {
+      const ends = o.series.filter(se => se.label !== false).map(se => { const pp = se.points.filter(q => q.y != null), p = pp[pp.length - 1]; return { se, y: y(p.y) }; })
+        .sort((a, b) => a.y - b.y);
+      for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+      for (const e of ends) {
+        s("line", { x1: W - m.r + 6, x2: W - m.r + 16, y1: e.y, y2: e.y }, svg, { stroke: e.se.color, strokeWidth: 2, strokeDasharray: e.se.dash || "" });
+        txt(svg, W - m.r + 20, e.y + 4, e.se.short || e.se.name, { class: "lab" });
+      }
+    }
+    // crosshair + tooltip
+    const cross = s("line", { y1: m.t, y2: H - m.b }, svg, { stroke: "var(--axis)", strokeWidth: 1, visibility: "hidden" });
+    const dots = o.series.map(se => s("circle", { r: 4 }, svg, { fill: se.color, stroke: "var(--surface)", strokeWidth: 2, visibility: "hidden" }));
+    const hit = s("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, class: "hit", tabindex: 0 }, svg);
+    const tp = tipper(host); let idx = -1;
+    const at = i => {
+      idx = Math.max(0, Math.min(allx.length - 1, i)); const xv = allx[idx];
+      cross.setAttribute("x1", x(xv)); cross.setAttribute("x2", x(xv)); cross.style.visibility = "visible";
+      const rows = [];
+      o.series.forEach((se, k) => {
+        const p = se.points.find(q => q.x === xv);
+        if (!p || p.y == null) { dots[k].style.visibility = "hidden"; return; }
+        dots[k].setAttribute("cx", x(xv)); dots[k].setAttribute("cy", y(p.y)); dots[k].style.visibility = "visible";
+        rows.push({ color: se.color, kind: se.dash ? "dash" : "line", value: (o.fmt || f3)(p.y) + (p.lo != null && o.ci !== false ? `  [${(o.fmt || f3)(p.lo)}, ${(o.fmt || f3)(p.hi)}]` : ""), name: se.name });
+      });
+      (o.refs || []).filter(r => r.label).forEach(r => rows.push({ color: r.color, kind: "dash", value: (o.fmt || f3)(r.y), name: r.label }));
+      const sc = host.clientWidth / W;
+      tp.show((o.xName || "layer") + " " + xv, rows, x(xv) * sc, m.t * sc + 20);
+    };
+    const off = () => { cross.style.visibility = "hidden"; dots.forEach(d => d.style.visibility = "hidden"); tp.hide(); };
+    hit.addEventListener("pointermove", ev => {
+      const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width, xv = x.inv(px);
+      let best = 0; allx.forEach((v, i) => { if (Math.abs(v - xv) < Math.abs(allx[best] - xv)) best = i; }); at(best);
+    });
+    hit.addEventListener("pointerleave", off); hit.addEventListener("blur", off);
+    hit.addEventListener("focus", () => at(idx < 0 ? allx.length - 1 : idx));
+    hit.addEventListener("keydown", ev => { if (ev.key === "ArrowLeft") { at(idx - 1); ev.preventDefault(); } if (ev.key === "ArrowRight") { at(idx + 1); ev.preventDefault(); } });
+  });
+}
+
+/* forest / range rows: rows [{label, tag, marks:[{est,lo,hi,color,hollow,name}]}] */
+function forest(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const narrow = W < 520, lw = o.labelW ? (narrow ? o.labelW * 0.8 : o.labelW) : (narrow ? 112 : 150), tagW = o.tags ? (narrow ? 58 : 70) : 0;
+    const rh = o.rowH || 26, m = { l: lw, r: 14 + tagW, t: 8, b: 36 }, H = m.t + m.b + rh * o.rows.length;
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "interval chart" }); host.prepend(svg);
+    const vals = o.rows.flatMap(r => r.marks.flatMap(k => [k.lo, k.hi, k.est])).filter(v => v != null).concat(o.band || [], o.ref != null ? [o.ref] : []);
+    let lo = o.x ? o.x[0] : Math.min(...vals), hi = o.x ? o.x[1] : Math.max(...vals); const pad = (hi - lo) * 0.06; if (!o.x) { lo -= pad; hi += pad; }
+    const x = lin(lo, hi, m.l, W - m.r);
+    for (const t of ticks(lo, hi, Math.max(3, Math.floor((W - m.l - m.r) / 80)))) {
+      s("line", { x1: x(t), x2: x(t), y1: m.t, y2: H - m.b }, svg, { stroke: "var(--grid)", strokeWidth: 1 });
+      txt(svg, x(t), H - m.b + 16, (o.tfmt || (v => v))(t), { "text-anchor": "middle" });
+    }
+    if (o.band) s("rect", { x: x(o.band[0]), y: m.t, width: x(o.band[1]) - x(o.band[0]), height: H - m.t - m.b }, svg, { fill: "var(--ink)", fillOpacity: 0.07 });
+    if (o.ref != null) s("line", { x1: x(o.ref), x2: x(o.ref), y1: m.t, y2: H - m.b }, svg, { stroke: "var(--axis)", strokeWidth: 1.4 });
+    if (o.xLabel) txt(svg, (m.l + W - m.r) / 2, H - 4, o.xLabel, { "text-anchor": "middle" });
+    const tp = tipper(host);
+    o.rows.forEach((r, i) => {
+      const cy = m.t + rh * i + rh / 2;
+      const g = s("g", { tabindex: 0, role: "listitem", "aria-label": r.label }, svg);
+      const bg = s("rect", { x: 0, y: m.t + rh * i, width: W, height: rh, class: "row-hit" }, g);
+      if (r.sep) s("line", { x1: 0, x2: W, y1: m.t + rh * i, y2: m.t + rh * i }, svg, { stroke: "var(--rule)", strokeWidth: 1 });
+      txt(g, lw - 10, cy + 4, r.label, { "text-anchor": "end", class: "lab" });
+      if (r.tag) { const t = txt(g, W - tagW + 6, cy + 4, r.tag, {}); t.style.fill = r.tagColor || "var(--muted)"; t.style.fontFamily = "var(--mono)"; t.style.fontSize = "11px"; }
+      const n = r.marks.length;
+      r.marks.forEach((k, j) => {
+        if (k.est == null) return;
+        const yy = cy + (n > 1 ? (j - (n - 1) / 2) * Math.min(9, (rh - 6) / n) : 0);
+        if (k.lo != null) s("line", { x1: x(k.lo), x2: x(k.hi), y1: yy, y2: yy }, g, { stroke: k.color, strokeWidth: 2, strokeLinecap: "round" });
+        s(k.square ? "rect" : "circle", k.square ? { x: x(k.est) - 4.5, y: yy - 4.5, width: 9, height: 9 } : { cx: x(k.est), cy: yy, r: 4.5 }, g,
+          { fill: k.hollow ? "var(--surface)" : k.color, stroke: k.hollow ? k.color : "var(--surface)", strokeWidth: k.hollow ? 2 : 1.5 });
+      });
+      const show = ev => {
+        bg.classList.add("on");
+        const rows = r.marks.filter(k => k.est != null).map(k => ({ color: k.color, kind: k.hollow ? "ring" : "dot", value: o.fmt(k.est) + (k.lo != null ? `  [${o.fmt(k.lo)}, ${o.fmt(k.hi)}]` : ""), name: k.name || "" }));
+        if (r.extra) r.extra.forEach(e => rows.push({ value: e }));
+        const sc = host.clientWidth / W;
+        tp.show(r.label, rows, (ev && ev.clientX != null ? ev.clientX - svg.getBoundingClientRect().left : x(r.marks[0].est ?? lo) * sc), cy * sc);
+      };
+      g.addEventListener("pointermove", show); g.addEventListener("focus", () => show());
+      g.addEventListener("pointerleave", () => { bg.classList.remove("on"); tp.hide(); }); g.addEventListener("blur", () => { bg.classList.remove("on"); tp.hide(); });
+    });
+  });
+}
+
+/* scatter with y = x reference */
+function scatter(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const H = Math.min(320, Math.max(240, W * 0.72)), m = { l: 46, r: 14, t: 10, b: 38 };
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria }); host.prepend(svg);
+    const x = lin(o.d[0], o.d[1], m.l, W - m.r), y = lin(o.d[0], o.d[1], H - m.b, m.t);
+    for (const t of ticks(o.d[0], o.d[1], 5)) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }, svg, { stroke: "var(--grid)" });
+      txt(svg, m.l - 7, y(t) + 4, t, { "text-anchor": "end" }); txt(svg, x(t), H - m.b + 16, t, { "text-anchor": "middle" });
+    }
+    s("line", { x1: x(o.d[0]), y1: y(o.d[0]), x2: x(o.d[1]), y2: y(o.d[1]) }, svg, { stroke: "var(--axis)", strokeDasharray: "4 4", strokeWidth: 1.2 });
+    txt(svg, (m.l + W - m.r) / 2, H - 4, o.xLabel, { "text-anchor": "middle" });
+    txt(svg, 12, (m.t + H - m.b) / 2, o.yLabel, { "text-anchor": "middle", transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` });
+    const tp = tipper(host);
+    for (const p of o.points) {
+      const g = s("g", { tabindex: 0 }, svg);
+      s(p.square ? "rect" : "circle", p.square ? { x: x(p.x) - 4.5, y: y(p.y) - 4.5, width: 9, height: 9 } : { cx: x(p.x), cy: y(p.y), r: 4.5 }, g,
+        { fill: p.hollow ? "var(--surface)" : p.color, stroke: p.hollow ? p.color : "var(--surface)", strokeWidth: p.hollow ? 2 : 1.5 });
+      s("circle", { cx: x(p.x), cy: y(p.y), r: 12 }, g, { fill: "transparent" });
+      const show = () => { const sc = host.clientWidth / W; tp.show(p.label, p.rows, x(p.x) * sc, y(p.y) * sc); };
+      g.addEventListener("pointerenter", show); g.addEventListener("focus", show);
+      g.addEventListener("pointerleave", () => tp.hide()); g.addEventListener("blur", () => tp.hide());
+    }
+  });
+}
+
+/* grouped bars: cats [{label, values:[v...], extra}], series [{name,color,hollow}] */
+function bars(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const H = 270, m = { l: 46, r: 10, t: 18, b: 54 };
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria }); host.prepend(svg);
+    const y = lin(0, o.ymax, H - m.b, m.t), cw = (W - m.l - m.r) / o.cats.length, ns = o.series.length;
+    const bw = Math.min(34, (cw - 18) / ns);
+    for (const t of ticks(0, o.ymax, 5)) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }, svg, { stroke: "var(--grid)" });
+      txt(svg, m.l - 7, y(t) + 4, t + (o.unit || ""), { "text-anchor": "end" });
+    }
+    const tp = tipper(host);
+    o.cats.forEach((c, i) => {
+      const cx = m.l + cw * i + cw / 2, x0 = cx - (bw * ns + 2 * (ns - 1)) / 2;
+      const g = s("g", { tabindex: 0 }, svg);
+      s("rect", { x: m.l + cw * i, y: m.t, width: cw, height: H - m.t - m.b, class: "row-hit" }, g);
+      c.values.forEach((v, j) => {
+        const bx = x0 + j * (bw + 2), top = y(v), base = y(0), r = Math.min(4, bw / 2);
+        const d = `M${bx},${base}L${bx},${top + r}Q${bx},${top} ${bx + r},${top}L${bx + bw - r},${top}Q${bx + bw},${top} ${bx + bw},${top + r}L${bx + bw},${base}Z`;
+        const se = o.series[j];
+        s("path", { d }, g, se.hollow ? { fill: "var(--surface-2)", stroke: se.color, strokeWidth: 1.6 } : { fill: se.color, stroke: "none" });
+        txt(g, bx + bw / 2, top - 5, v.toFixed(1), { "text-anchor": "middle", class: "lab" }).style.fontSize = "11px";
+      });
+      const words = c.label.split(" ");
+      txt(svg, cx, H - m.b + 17, words[0], { "text-anchor": "middle", class: "lab" });
+      txt(svg, cx, H - m.b + 32, words.slice(1).join(" "), { "text-anchor": "middle" });
+      if (c.sub) { const t = txt(svg, cx, H - m.b + 46, c.sub, { "text-anchor": "middle" }); t.style.fill = "var(--crit-ink)"; t.style.fontSize = "10.5px"; }
+      const show = () => { const sc = host.clientWidth / W; tp.show(c.label, o.series.map((se, j) => ({ color: se.color, kind: se.hollow ? "hollow" : "rect", value: c.values[j].toFixed(2) + (o.unit || ""), name: se.name })).concat((c.extra || []).map(e => ({ value: e }))), cx * sc, y(Math.max(...c.values)) * sc); };
+      g.addEventListener("pointerenter", show); g.addEventListener("focus", show);
+      g.addEventListener("pointerleave", () => tp.hide()); g.addEventListener("blur", () => tp.hide());
+    });
+    s("line", { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0) }, svg, { stroke: "var(--axis)" });
+  });
+}
+
+
+/* ------------------------------------------------------------------ page */
+const qsort = (a, b) => QORD.indexOf(a.q) - QORD.indexOf(b.q) || a.depth - b.depth || a.width - b.width;
+const C = D.cells.slice().sort(qsort);
+const DEPTHS = [3, 4, 5];
+const DCOL = { 3: "var(--d3)", 4: "var(--d4)", 5: "var(--d5)" };
+const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+const p1 = v => (100 * v).toFixed(1), p0 = v => (100 * v).toFixed(0);
+const rng = (xs, f = p0) => f(Math.min(...xs)) + "–" + f(Math.max(...xs));
+const byQ = q => C.filter(c => c.q === q), byD = d => C.filter(c => c.depth === d);
+const cell = id => C.find(c => c.id === id);
+const el = id => document.getElementById(id);
+const qLegend = () => QORD.map(q => ({ kind: "dot", color: QCOL[q], label: QLAB[q] }));
+const yPct = t => (100 * t).toFixed(0) + "%";
+const pts = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(1);
+
+function header() {
+  el("gen").textContent = "compiled " + D.generated;
+  el("ncells").textContent = String(C.length);
+  el("res-tag").textContent = C.length + " checkpoints · SID level";
+  const st = el("status"), V = D.validation;
+  const card = (k, chip, cls, v) => { const c = h("div", { class: "stat" }, st); h("span", { class: "chip " + cls }, c, chip); h("div", { class: "k" }, c, k); h("div", { class: "v" }, c, v); };
+  card("Reveal trace", C.length + " of 20 checkpoints", "part", `Run on all 20. ${V.failed.length} differ from the matched-beam lists by a tie in one or two users and are held back until that is agreed.`);
+  card("Kind of evidence", "observational", "wait", "A record of the decode. It describes what the model outputs at each step and does not show what the model uses.");
+  card("Patching experiments", "not yet run", "wait", "The code for the three kinds of patching is written and tested. Its first experiment is next.");
+
+  const fam = d => p0(mean(byD(d).map(c => c.greedy_states_in_trained_family)));
+  const set = d => p0(mean(byD(d).map(c => c.greedy_sid_settled_at_state0)));
+  const dead = d => p0(D.beam_by_depth[256][d].dead.at(-1));
+  const g128 = q => DEPTHS.map(d => { const c = C.find(x => x.q === q && x.depth === d && x.width === 128); return c ? D.gain_mean[c.id].toFixed(2) : "–"; }).join(", ");
+  const fs = el("findings");
+  const item = (href, title, paras) => {
+    const l = h("li", {}, fs), t = h("div", { class: "t" }, l);
+    h("a", { href }, t, title);
+    paras.forEach((p, i) => h("p", i ? { class: "caveat" } : {}, l, p));
+  };
+  item("#results", "The first digit revealed depends on the quantizer",
+    [`RQ-VAE reveals digit 1 first for ${rng(byQ("rqvae").map(c => c.greedy_first_is_digit1))}% of users. RQ-KMeans (${rng(byQ("rqkmeans").map(c => c.greedy_first_is_digit1))}%) and MQ (${rng(byQ("MQ").map(c => c.greedy_first_is_digit1))}%) are close to the share that no preference would give, and the order differs from user to user.`]);
+  item("#results", "Most decode states at depth 5 are ones training never visited",
+    [`${fam(3)}% of greedy-path states are in the set training visited at depth 3, ${fam(4)}% at depth 4 and ${fam(5)}% at depth 5. Depth-5 models never train on the fully masked state.`]);
+  item("#results", "The answer forms over the steps",
+    [`The first guess, made from the fully masked state, already equals the greedy path's final SID for ${set(3)}%, ${set(4)}% and ${set(5)}% of users at depth 3, 4 and 5. Within a step, the top code is the final one after the first decoder block for ${rng(QORD.map(q => D.blocks_by_q[q].agree[0]))}% of masked digits, depending on the quantizer.`]);
+  item("#results", "Every map's digits inform each other, MQ included",
+    [`Revealing one target digit raises another's log-probability in every checkpoint. At width 128 and depth 3, 4 and 5 the mean gain is ${g128("MQ")} nats for MQ and ${g128("rqkmeans")} for RQ-KMeans, although MQ digits are parallel partitions and RQ digits a hierarchy.`,
+     "Teacher-forced and observational. A wider codebook starts from lower probabilities, so only checkpoints of the same width are compared."]);
+  item("#results", "The beam keeps paths that cannot become an item",
+    [`By the last step, ${dead(3)}%, ${dead(4)}% and ${dead(5)}% of beam-256 paths at depth 3, 4 and 5 match no catalogue SID. Duplicate paths, reported earlier for final beams, build up from the second step.`]);
+  el("secs").textContent = (D.seconds_total / 60).toFixed(0) + " GPU-minutes";
+}
+
+/* shaded table: one hue, light to dark, value printed in every cell */
+function heat(wrap, rowLabels, colLabels, vals, o) {
+  wrap.textContent = "";
+  const t = h("table", { class: "heat" }, wrap), tr = h("tr", {}, h("thead", {}, t)), tb = h("tbody", {}, t);
+  h("th", {}, tr, o.corner || "");
+  colLabels.forEach(c => h("th", { class: "c" }, tr, c));
+  (o.extraHead || []).forEach(c => h("th", { class: "r" }, tr, c));
+  vals.forEach((row, i) => {
+    const x = h("tr", {}, tb); h("td", {}, x, rowLabels[i]);
+    colLabels.forEach((_, j) => {
+      const v = row[j];
+      if (v == null) { h("td", { class: "na" }, x, o.na || ""); return; }
+      const td = h("td", { class: "v" }, x, o.fmt(v));
+      td.style.background = `color-mix(in srgb, var(--seq) ${(58 * Math.max(0, Math.min(1, v / o.max))).toFixed(1)}%, var(--surface))`;
+    });
+    (o.extra ? o.extra(i) : []).forEach(c => h("td", { class: "r" }, x, c));
+  });
+}
+
+function firstDigit() {
+  heat(el("t-first"), C.map(c => c.label), [1, 2, 3, 4, 5].map(d => "digit " + d),
+    C.map(c => [0, 1, 2, 3, 4].map(d => D.first[c.id][d] ?? null)),
+    { corner: "Checkpoint", max: 0.85, fmt: v => p0(v) + "%", na: "·", extraHead: ["Chance", "Most common order", "Its share"],
+      extra: i => [p0(1 / C[i].depth) + "%", C[i].modal_order.split("").join(" → "), p0(C[i].greedy_modal_order_share) + "%"] });
+}
+
+function depthLines(id, get, o) {
+  lineChart(el(id), { y: o.y, yFmt: yPct, fmt: pct, h: 240, endLabels: true, xName: o.xName, xLabel: o.xLabel, aria: o.aria, yTicks: 4,
+    series: DEPTHS.map(d => ({ name: "depth " + d, short: "depth " + d, color: DCOL[d], points: get(d).map((y, i) => ({ x: i + (o.from || 0), y })) })) });
+}
+
+function steps() {
+  depthLines("v-family", d => D.family_by_depth[d], { y: [0, 1], xName: "state", xLabel: "digits already revealed", aria: "Share of greedy-path states that training visited, by state and depth" });
+  depthLines("v-guess", d => D.guess_by_depth[d].final, { y: [0, 1], xName: "state", xLabel: "digits already revealed", aria: "Share of users whose current guess equals the final SID, by state and depth" });
+  depthLines("v-dead", d => D.beam_by_depth[256][d].dead, { y: [0, 0.3], from: 1, xName: "after step", xLabel: "after step", aria: "Share of beam-256 paths no catalogue SID completes, by step and depth" });
+}
+
+function blocks() {
+  legend("lg-blocks", QORD.map(q => ({ kind: "line", color: QCOL[q], label: QLAB[q] })));
+  lineChart(el("v-blocks"), { y: [0.3, 1], yFmt: yPct, fmt: pct, h: 240, endLabels: true, ci: false, xName: "after block", xLabel: "decoder block",
+    aria: "Share of masked digits whose top code after each decoder block equals the final one, by quantizer",
+    series: QORD.map(q => ({ name: QLAB[q], short: QLAB[q], color: QCOL[q], band: true,
+      points: D.blocks_by_q[q].agree.map((y, i) => ({ x: i + 1, y, lo: D.blocks_by_q[q].lo[i], hi: D.blocks_by_q[q].hi[i] })) })) });
+}
+
+function gains() {
+  const sm = el("sm-gain");
+  for (const id of ["diff-next1-rqkmeans-3cb-128", "diff-next1-rqvae-3cb-128", "diff-next1-MQ-3cb-128"]) {
+    const c = cell(id); if (!c) continue;
+    const box = h("div", { class: "viz-col" }, sm); h("h3", {}, box, c.label);
+    const w = h("div", { class: "tablewrap" }, box);
+    heat(w, [1, 2, 3].map(d => "reveal digit " + d), [1, 2, 3].map(d => "at digit " + d), D.gains[id], { max: 3.3, fmt: v => "+" + v.toFixed(2), na: "·" });
+  }
+  const gw = n => C.filter(c => c.width === n).map(c => D.gain_mean[c.id]);
+  el("gain-note").textContent = `Over all checkpoints the mean gain is ${rng(gw(128), f2)} nats at width 128 and ${rng(gw(512), f2)} at width 512; a wider codebook starts from lower probabilities, so widths are not compared.`;
+}
+
+function calibration() {
+  legend("lg-cal", qLegend());
+  forest(el("v-cal"), { ref: 0, fmt: v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3), tfmt: v => v, xLabel: "highest probability minus accuracy", rowH: 22, labelW: 132,
+    aria: "Confidence minus accuracy at the fully masked state, per checkpoint",
+    rows: C.map((c, i) => ({ label: c.label, sep: i > 0 && C[i - 1].q !== c.q,
+      extra: [`accuracy ${p1(c.state0_top1_accuracy)}%, mean highest probability ${p1(c.state0_mean_max_probability)}%`],
+      marks: [{ est: c.state0_confidence_minus_accuracy, lo: c.state0_confidence_minus_accuracy_lo, hi: c.state0_confidence_minus_accuracy_hi, color: QCOL[c.q], name: "95% CI" }] })) });
+}
+
+function expectations() {
+  const key = c => c.depth + "x" + c.width, mq = Object.fromEntries(byQ("MQ").map(c => [key(c), c]));
+  const pairs = C.filter(c => c.q !== "MQ" && mq[key(c)]);
+  const e1 = pairs.filter(c => c.greedy_first_is_digit1 > mq[key(c)].greedy_first_is_digit1).length;
+  const tri = [];
+  for (const q of QORD) for (const w of [128, 512]) tri.push({ name: QLAB[q] + " ×" + w, g: [3, 4, 5].map(d => C.find(c => c.q === q && c.depth === d && c.width === w)) });
+  const gapv = c => c.state0_confidence_minus_accuracy, full = tri.filter(t => t.g.every(Boolean));
+  const e3 = full.filter(t => gapv(t.g[2]) > Math.max(gapv(t.g[0]), gapv(t.g[1]))).length;
+  const lost = tri.filter(t => t.g[2] && [t.g[0], t.g[1]].some(c => c && gapv(c) > gapv(t.g[2]))).map(t => t.name);
+  const open = tri.length - full.length - lost.filter(n => !full.some(f => f.name === n)).length;
+  const wrap = el("t-exp"); wrap.textContent = "";
+  const t = h("table", { class: "verdicts" }, wrap), tr = h("tr", {}, h("thead", {}, t)), tb = h("tbody", {}, t);
+  ["", "Prediction", `On the ${C.length} checkpoints so far`].forEach(c => h("th", {}, tr, c));
+  const row = (id, a, b) => { const x = h("tr", {}, tb); h("td", {}, x, id); h("td", { class: "exp" }, x, a); h("td", {}, x, b); };
+  row("E1", "The greedy path reveals digit 1 first for more users on every RQ-KMeans and RQ-VAE checkpoint than on the MQ checkpoint of the same depth and width.",
+    `True in ${e1} of the ${pairs.length} comparisons available. For RQ-KMeans the margin is small.`);
+  row("E3", "Confidence minus accuracy at the fully masked state is largest at depth 5 in at least 4 of the 6 quantizer and width pairs.",
+    `True in ${e3} of the ${full.length} complete pairs. Already false for ${lost.join(", ") || "none"}. ${open} pairs undecided.`);
+}
+
+function sidChips(parent, codes) { const sp = h("span", { class: "sid" }, parent); codes.forEach(c => h("i", { class: "on" }, sp, String(c))); return sp; }
+
+function examples() {
+  const E = D.examples; el("ex-cell").textContent = E.cell;
+  const lg = el("lg-strip"); lg.textContent = "";
+  const key = (st, text) => { const sp = h("span", {}, lg); const sw = h("i", { class: "key" }, sp); Object.assign(sw.style, st); sp.appendChild(document.createTextNode(text)); };
+  key({ width: "16px", height: "12px", border: "1px dashed var(--axis)", borderRadius: "3px" }, "masked digit: most probable code and its probability");
+  key({ width: "16px", height: "12px", border: "1px solid var(--ink-2)", borderRadius: "3px", background: "color-mix(in srgb, var(--ink) 14%, var(--surface))" }, "revealed digit");
+  key({ width: "16px", height: "12px", outline: "2px solid var(--part)", borderRadius: "3px" }, "written at this step");
+  const host = el("strips");
+  for (const x of E.rows) {
+    const fg = h("figure", {}, host), cap = h("div", { class: "cap" }, fg);
+    h("h3", {}, cap, x.kind);
+    h("p", {}, cap, `History of ${x.history_length} items. ` + (x.beam_rank ? `The target is ranked ${x.beam_rank} at beam 256.` : "The target is not in the beam-256 top 10."));
+    const dl = h("dl", { class: "kv" }, fg);
+    const line = (name, codes, it, note) => { h("dt", {}, dl, name); const dd = h("dd", {}, dl); sidChips(dd, codes); dd.appendChild(document.createTextNode("  ")); h("b", {}, dd, it ? it.title : "no catalogue item"); if (it) dd.appendChild(document.createTextNode(" · " + it.cat)); if (note) dd.appendChild(document.createTextNode(" · " + note)); };
+    line("Target", x.target, x.target_item, x.target_is_last ? "same SID as the most recent history item" : "");
+    line("Most recent history item", x.last, x.last_item, x.last_bucket > 1 ? x.last_bucket + " items share this SID" : "");
+    line("First-ranked SID", x.final, x.final_item, x.final_is_last ? "the most recent history item" : "");
+    const w = h("div", { class: "tablewrap" }, fg), t = h("table", { class: "strip" }, w), tr = h("tr", {}, h("thead", {}, t)), tb = h("tbody", {}, t);
+    ["State"].concat(x.states[0].digits.map((_, d) => "Digit " + (d + 1)), ["Current guess is a catalogue SID"]).forEach((c, i) => h("th", i && i <= E.n ? { class: "c" } : {}, tr, c));
+    x.states.forEach((sv, ti) => {
+      const r = h("tr", {}, tb); h("td", {}, r, ti === 0 ? "0 · fully masked" : String(ti));
+      sv.digits.forEach((dg, d) => {
+        const td = h("td", { class: "dg" }, r), c = h("span", { class: "cell" + (dg.revealed ? " rev" : "") + (sv.commit_digit === d ? " next" : "") }, td);
+        h("b", {}, c, String(dg.code));
+        h("small", {}, c, dg.revealed ? "revealed" : p0(dg.p) + "%" + (dg.target_rank > 1 ? " · target #" + dg.target_rank : ""));
+      });
+      h("td", {}, r, sv.guess_legal ? "yes" : "no");
+    });
+  }
+}
+
+function coverage() {
+  const V = D.validation, ok = V.passed.filter(v => v.v6 === "passed").length;
+  el("cov-lede").textContent = `Every run had to pass six checks before its record was saved, among them that recording changes nothing and that the beam-64 and beam-256 lists equal those of the matched-beam experiment exactly. ${ok} of the 18 checkpoints in that experiment passed and ${V.failed.length}, all of width 512, did not. The two checkpoints outside that experiment have no lists to compare with and are included.`;
+  table("t-diag", ["Checkpoint", "Users with a different list, beam 64", "Beam 256", "Kind", "Score spread of the entries involved", "Targets whose rank changed", "Hit@10 here / earlier, beam 256"],
+    V.failed.map(f => { const a = f.beams["64"], b = f.beams["256"];
+      return [f.label, String(a.users), String(b.users), [...new Set(a.kinds.concat(b.kinds))].join("; "), (v => v === 0 ? "0" : v.toExponential(1))(Math.max(a.spread, b.spread)),
+        String(a.rank_changed + b.rank_changed), `${p1(b.hit_here)}% / ${p1(b.hit_archive)}%`]; }), [1, 2, 4, 5, 6]);
+  el("t-diag").querySelector("table").classList.add("wrapth");
+}
+
+function sources() {
+  const f = el("sources");
+  h("div", { class: "eyebrow" }, f, "Sources");
+  h("div", {}, f, "Every number on this page is read from these result files (first 16 hex digits of sha256). Protocol and full write-up: experiments/representation/exp4_diffusion_reveal_trace/ in the SidLens repository.");
+  const groups = {};
+  for (const s_ of D.sources) { const k = s_.path.endsWith("trace.npz") ? "trace" : "other"; (groups[k] = groups[k] || []).push(s_); }
+  for (const s_ of groups.other || []) { const d = h("div", {}, f); h("code", {}, d, s_.path); d.appendChild(document.createTextNode("  " + s_.sha256)); }
+  if (groups.trace) { const d = h("div", {}, f); h("code", {}, d, groups.trace[0].path.replace(/cell-\d+/, "cell-XX")); d.appendChild(document.createTextNode(`  ${groups.trace.length} files, one per saved checkpoint`)); }
+}
+
+header(); firstDigit(); steps(); blocks(); gains(); calibration(); expectations(); examples(); coverage(); sources();
+</script>

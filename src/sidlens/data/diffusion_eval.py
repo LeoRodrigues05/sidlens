@@ -45,6 +45,9 @@ class DiffusionEvalCohort:
     input_sha256: dict[str, str]
     cohort_sha256: str
     sid_lineage: dict
+    # Grid cohorts (sidlens.grid.inputs) carry OneDiffRec's example ids, which
+    # pair each row with the AR row for the same event. None for the frozen cohort.
+    example_ids: tuple[str, ...] | None = None
 
     def __len__(self) -> int:
         return len(self.users)

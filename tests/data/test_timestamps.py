@@ -100,3 +100,18 @@ def test_diffusion_cohort_is_inter_json(ev):
     rows, hist = T.diffusion_row_times(cohort, ev)
     assert len(rows) == 6297 and (rows.pos == rows.hist_len).sum() > 0
     assert (hist.gap_days >= 0).all()
+
+
+def test_office_aligns_with_one_flagged_position():
+    """Office: repeated identical windows resolve by occurrence order; exactly one
+    position (four copies of one item over two adjacent days) is unsettled, and
+    the strict default refuses it."""
+    if not (paths.FROZEN_DATA / "reviews" / "Office.review.json").exists():
+        pytest.skip("frozen Office reviews not on this machine")
+    with pytest.raises(ValueError, match="assignments fit"):
+        T.load_event_times("Office")
+    ev = T.load_event_times("Office", None, "flag")
+    assert ev.ambiguous == frozenset({("61413", 14)})
+    assert ev.report["n_events"] == 472091
+    for u, t in ev.times.items():
+        assert np.all(np.diff(t) >= 0)

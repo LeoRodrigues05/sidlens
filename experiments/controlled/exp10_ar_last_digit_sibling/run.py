@@ -20,6 +20,12 @@ Traps guarded here:
   marked, never silently dropped.
 
     python experiments/controlled/exp10_ar_last_digit_sibling/run.py --cell 1 --split test --out <new dir>
+    python .../run.py --ckpt 'grid:<key>@best' --split test --out <new dir>
+
+Grid runs (`sidlens.grid`): the run's own rows, SID table and prompt; near-
+duplicate pairs from `grid.events.near_duplicates` (structure exp4, both
+catalogs); re-bought items from the run's own training rows; rows padded to
+their length bucket. There is no exp4 archive to compare clean scores with.
 """
 
 from __future__ import annotations
@@ -39,10 +45,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 from sidlens import paths                                                # noqa: E402
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.data.sids import SidTable                                   # noqa: E402
-from sidlens.interventions.runner import FixedShapeRunner, Job, max_diff  # noqa: E402
+from sidlens.interventions.runner import FixedShapeRunner, Job, length_buckets, max_diff  # noqa: E402
 from sidlens.interventions.scoring import DigitScorer                    # noqa: E402
 from sidlens.models import ar                                            # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod         # noqa: E402
+from sidlens.provenance import hashing                                   # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
 ND_PAIRS = (paths.DERIVED / "structure" / "exp3_collision_causes" / "293555" / "result"
@@ -51,18 +57,14 @@ SEED = 20260927
 
 
 def checkpoint_sha(ckpt: str) -> str:
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Weights hash, checked against the freeze manifest or the grid registry."""
+    return ar.checkpoint_sha(ckpt)
 
 
-def rebought_items(variant) -> set[int]:
+def rebought_items(variant, train=None) -> set[int]:
     """Items that some train row has both in its history and as its target."""
     out = set()
-    for e in P.load_examples(variant, "next-item", "train"):
+    for e in (train if train is not None else P.load_examples(variant, "next-item", "train")):
         if e.target_item_ids[0] in e.history_item_ids:
             out.add(e.target_item_ids[0])
     return out
@@ -89,7 +91,9 @@ def row_info(e: P.Encoded, n: int, nd_adj, rebought) -> dict | None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", choices=tuple(n for n in ar.known_checkpoints() if ar.is_grid(n)),
+                    help="a next-item grid weight state (grid:<key>@<state>) instead of --cell")
     ap.add_argument("--split", default="test", choices=("valid", "test"))
     ap.add_argument("--limit", type=int, default=None, help="first N eligible rows (pilot only)")
     ap.add_argument("--rows", type=int, default=128)
@@ -97,7 +101,9 @@ def main(argv=None) -> int:
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    ckpt = CELLS[args.cell]
+    if (args.cell is None) == (args.ckpt is None):
+        ap.error("give exactly one of --cell or --ckpt")
+    ckpt = args.ckpt or CELLS[args.cell]
     args.out.mkdir(parents=True, exist_ok=True)
     if any((args.out / f).exists() for f in ("inputs.json", "validation.json", "scores.parquet")):
         raise FileExistsError(f"{args.out} already holds results; results are never overwritten")
@@ -117,24 +123,40 @@ def main(argv=None) -> int:
     vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(str(paths.FROZEN_CKPT / "ar" / ckpt), local_files_only=True)
-    examples = P.load_examples(vocab.variant, "next-item", args.split)
-    table = SidTable.load(vocab.variant)
-    validation = {"table": P.check_against_table(examples, table),
-                  "vocab_vs_table": ar.validate_against(vocab, table)}
-    if args.split == "test":
-        validation["archive"] = P.check_against_archive(examples)
+    tok = AutoTokenizer.from_pretrained(str(ar.checkpoint_dir(ckpt)), local_files_only=True)
+    grid_info, buckets, gin = {}, None, None
+    if ar.is_grid(ckpt):
+        from sidlens.grid import events as GE, inputs as GI
+        gin = GI.ArSetup(ckpt, args.split, tok, vocab, task="next-item")
+        examples, table, template, validation = gin.examples, gin.table, gin.template, gin.validation
+        grid_info, csv = gin.info, gin.csv
+    else:
+        examples = P.load_examples(vocab.variant, "next-item", args.split)
+        table = SidTable.load(vocab.variant)
+        validation = {"table": P.check_against_table(examples, table),
+                      "vocab_vs_table": ar.validate_against(vocab, table)}
+        if args.split == "test":
+            validation["archive"] = P.check_against_archive(examples)
+        template, csv = "eval", P.csv_path(vocab.variant, "next-item", args.split)
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation, default=str)[:2000]}")
-    clean_all = [P.encode(ex, tok, vocab, template="eval", with_target=True) for ex in examples]
+    clean_all = [P.encode(ex, tok, vocab, template=template, with_target=True) for ex in examples]
     t_pad = -(-max(len(e) for e in clean_all) // 8) * 8          # as exp4: over the whole split
-
-    nd = pd.read_csv(ND_PAIRS)
-    nd_adj: dict[int, set[int]] = {}
-    for a, b in zip(nd.i, nd.j):
-        nd_adj.setdefault(int(a), set()).add(int(b))
-        nd_adj.setdefault(int(b), set()).add(int(a))
-    rebought = rebought_items(vocab.variant)
+    if gin is not None:
+        examples, clean_all = GI.sort_by_length(examples, clean_all)
+        buckets = length_buckets([len(e) for e in clean_all])
+        t_pad = buckets[-1]
+        nd_adj = GE.near_duplicates(gin.entry)
+        nd_sha = hashing.sha256_file(paths.WORK / GE.ND_DIR / f"{gin.entry['dataset']}.csv")
+        rebought = rebought_items(None, GI.ar_examples(gin.entry, "train", sample=False))
+    else:
+        nd = pd.read_csv(ND_PAIRS)
+        nd_adj: dict[int, set[int]] = {}
+        for a, b in zip(nd.i, nd.j):
+            nd_adj.setdefault(int(a), set()).add(int(b))
+            nd_adj.setdefault(int(b), set()).add(int(a))
+        nd_sha = hashing.sha256_file(ND_PAIRS)
+        rebought = rebought_items(vocab.variant)
     rows = [(i, x) for i, e in enumerate(clean_all)
             if (x := row_info(e, n, nd_adj, rebought)) is not None]
     if args.limit:
@@ -151,14 +173,15 @@ def main(argv=None) -> int:
             legal[x["prefix"]] = m
 
     inputs = {"checkpoint": f"ar/{ckpt}", "checkpoint_sha256": checkpoint_sha(ckpt),
-              "variant": vocab.variant.name, "n_digits": n, "split": args.split, "template": "eval",
-              "csv_sha256": hashing.sha256_file(P.csv_path(vocab.variant, "next-item", args.split)),
+              "variant": vocab.variant.name, "n_digits": n, "split": args.split, "template": template,
+              "csv_sha256": hashing.sha256_file(csv),
               "sem_ids_sha256": hashing.sha256_file(table.source),
-              "nd_pairs_sha256": hashing.sha256_file(ND_PAIRS),
+              "nd_pairs_sha256": nd_sha,
               "n_rows_split": len(examples), "n_eligible": len(rows), "limited": args.limit,
               "n_by_subset": pd.Series([x["subset"] for _, x in rows]).value_counts().to_dict(),
               "n_without_control": int(sum(x["j"] is None for _, x in rows)),
-              "n_rebought_items_train": len(rebought), "t_pad": t_pad, "batch_rows": args.rows}
+              "n_rebought_items_train": len(rebought), "t_pad": t_pad, "batch_rows": args.rows,
+              **({"buckets": buckets, **grid_info} if grid_info else {})}
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1, default=str))
     (args.out / "arguments.json").write_text(json.dumps({k: str(v) for k, v in vars(args).items()}, indent=1))
     log(f"inputs ok: {ckpt} {args.split} eligible={len(rows)} {inputs['n_by_subset']} T_pad={t_pad}")
@@ -170,7 +193,8 @@ def main(argv=None) -> int:
                    "device": torch.cuda.get_device_name() if args.device.startswith("cuda") else "cpu",
                    "torch": torch.__version__, "transformers": __import__("transformers").__version__})
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1, default=str))
-    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1)
+    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1,
+                              buckets=buckets)
 
     jobs = []
     for i, x in rows:
@@ -230,7 +254,7 @@ def main(argv=None) -> int:
                                   "max_abs_diff": float(g.max_abs_diff.max())}
                               for k, g in c.groupby("control")}
     # clean agreement with exp4 (test only: exp4's test run is 281394)
-    if args.split == "test":
+    if args.split == "test" and gin is None:
         e4 = pd.read_parquet(paths.DERIVED / "controlled" / "exp4_ar_copy_circuit" / "281394"
                              / f"cell-{args.cell:02d}" / "clean.parquet")
         e4 = e4[e4.digit == n - 1].set_index("example_id").logp_codes

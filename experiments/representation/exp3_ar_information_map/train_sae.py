@@ -28,9 +28,8 @@ HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[3] / "src"))
 sys.path.insert(0, str(HERE.parents[1] / "exp2_ar_sae"))
 
-from sidlens.data import ar_prompts as P                                 # noqa: E402
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.hooks.store import StoreReader                              # noqa: E402
-from sidlens.provenance import manifest as manifest_mod                  # noqa: E402
 from sidlens.sae.topk import SaeConfig, TopKSAE                          # noqa: E402
 from train import CFG, role_groups, user_bucket                          # noqa: E402  (exp2, unchanged)
 
@@ -40,22 +39,16 @@ LAYERS = tuple(range(0, 27, 2)) + (27,)
 
 def open_store(capture: Path, ckpt: str, split: str, layers) -> StoreReader:
     """Verified store of this checkpoint, split and template, captured self-forced."""
-    st = StoreReader(Path(capture) / "store", verify=True)
-    m = st.meta
-    want = manifest_mod.load()["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    if (m["model"], m["checkpoint_sha256"], m["split"], m["template"]) != (f"ar/{ckpt}", want, split, "eval"):
-        raise RuntimeError(f"store {capture}: {m['model']} {m['split']} {m['template']} is not {ckpt} {split} eval")
-    if m.get("target") != "self-greedy":
-        raise RuntimeError(f"store {capture} is not a self-greedy capture (target={m.get('target')})")
-    missing = [f"model.layers.{L}" for L in layers if f"model.layers.{L}" not in st.sites]
-    if missing:
-        raise KeyError(f"store {capture} lacks {missing}")
+    st = AI.capture_store(capture, ckpt, split, sites=[f"model.layers.{L}" for L in layers])
+    if st.meta.get("target") != "self-greedy":
+        raise RuntimeError(f"store {capture} is not a self-greedy capture (target={st.meta.get('target')})")
     return st
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a grid weight state (grid:<key>@<state>) instead of --cell")
     ap.add_argument("--train-capture", type=Path, required=True, help="ar_capture --out dir (holds store/)")
     ap.add_argument("--test-capture", type=Path, required=True)
     ap.add_argument("--layers", default=",".join(map(str, LAYERS)))
@@ -64,7 +57,9 @@ def main(argv=None) -> int:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    ckpt = CELLS[args.cell]
+    if (args.cell is None) == (args.ckpt is None):
+        ap.error("give exactly one of --cell or --ckpt")
+    ckpt = args.ckpt or CELLS[args.cell]
     layers = tuple(int(x) for x in args.layers.split(","))
     args.out.mkdir(parents=True, exist_ok=True)
     if (args.out / "fidelity.json").exists():
@@ -78,7 +73,7 @@ def main(argv=None) -> int:
     tr = open_store(args.train_capture, ckpt, "train", layers)
     te = open_store(args.test_capture, ckpt, "test", layers)
     variant = tr.meta["variant"]
-    users = {e.example_id: e.user_id for e in P.load_examples(variant, "next-item", "train")}
+    users = {e.example_id: e.user_id for e in AI.examples(ckpt, "train")}
     tr_user = tr.rows.example_id.map(users)
     if tr_user.isna().any():
         raise ValueError("train store rows whose example is not in the train CSV")

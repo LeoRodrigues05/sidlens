@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from sidlens.analysis.matched_decode import decode
+from sidlens.analysis.matched_decode import decode, score_partial
 
 
 class TinyModel(torch.nn.Module):
@@ -187,3 +187,72 @@ def test_training_mode_rejected():
     model = TinyModel().train()
     with pytest.raises(ValueError, match="eval"):
         decode(model, torch.zeros(1, 1, 1), beam_width=4, policy="confidence")
+
+
+def _commit(step, batch):
+    after = step.states[torch.arange(batch)[:, None], step.parents].clone()
+    after.scatter_(2, step.positions[:, :, None], step.codes[:, :, None])
+    return after
+
+
+def test_observer_sees_every_step_and_changes_nothing():
+    model = TinyModel()
+    hidden = torch.tensor([0.1, 1.3, 2.7]).reshape(3, 1, 1)
+    plain = decode(model, hidden, beam_width=7, policy="confidence")
+    seen = []
+    watched = decode(model, hidden, beam_width=7, policy="confidence", observer=seen.append)
+    assert torch.equal(plain.codes, watched.codes) and torch.equal(plain.scores, watched.scores)
+    assert [step.step for step in seen] == [0, 1, 2]
+    first = seen[0]
+    assert first.states.shape == (3, 1, 3) and (first.states == -1).all()
+    assert torch.equal(first.state_scores, torch.zeros(3, 1))
+    start = model.logits_for(torch.zeros(3, 3, dtype=torch.long), torch.ones(3, 3, dtype=torch.bool),
+                             hidden[:, 0, 0])
+    assert torch.equal(first.log_probs[:, 0], torch.log_softmax(start, -1))
+    for before, after in zip(seen, seen[1:]):
+        assert torch.equal(_commit(before, 3), after.states)
+        assert torch.equal(before.scores, after.state_scores)
+    assert torch.equal(_commit(seen[-1], 3)[:, 0], plain.codes[:, 0])
+    assert torch.equal(seen[-1].scores[:, 0], plain.scores[:, 0])
+
+
+@pytest.mark.parametrize("policy,order", [("confidence", None), ("fixed", (2, 0, 1))])
+def test_default_scorer_passed_explicitly_is_identical(policy, order):
+    model = TinyModel()
+    hidden = torch.tensor([0.1, 1.3, 2.7]).reshape(3, 1, 1)
+    options = {"beam_width": 7, "policy": policy, "order": order, "decoder_chunk_size": 4}
+    plain = decode(model, hidden, **options)
+    explicit = decode(model, hidden, **options,
+                      score_fn=lambda step, partial, rows: score_partial(model, hidden, None, partial, rows))
+    assert torch.equal(plain.codes, explicit.codes) and torch.equal(plain.scores, explicit.scores)
+    assert plain.beam_sizes == explicit.beam_sizes
+
+
+def test_score_fn_can_take_single_steps_from_another_history():
+    model = TinyModel()
+    here = torch.tensor([0.1, 1.3]).reshape(2, 1, 1)
+    there = torch.tensor([2.2, 0.4]).reshape(2, 1, 1)
+
+    def switched(steps):
+        return decode(model, here, beam_width=5, policy="confidence", score_fn=lambda step, partial, rows:
+                      score_partial(model, there if step in steps else here, None, partial, rows))
+
+    base = decode(model, here, beam_width=5, policy="confidence")
+    other = decode(model, there, beam_width=5, policy="confidence")
+    for result, expected in ((switched(set()), base), (switched({0, 1, 2}), other)):
+        assert torch.equal(result.codes, expected.codes) and torch.equal(result.scores, expected.scores)
+    for steps in ({0}, {1}, {2}):
+        one = switched(steps)
+        assert not torch.equal(one.scores, base.scores) and not torch.equal(one.scores, other.scores)
+
+
+@pytest.mark.parametrize("spoil", [
+    lambda scores: scores[:, :, :-1], lambda scores: scores.double(),
+    lambda scores: torch.full_like(scores, float("nan")), lambda scores: torch.full_like(scores, float("inf")),
+])
+def test_score_fn_output_is_checked(spoil):
+    model = TinyModel()
+    hidden = torch.zeros(1, 1, 1)
+    with pytest.raises(ValueError, match="score_fn"):
+        decode(model, hidden, beam_width=4, policy="confidence", score_fn=lambda step, partial, rows:
+               spoil(score_partial(model, hidden, None, partial, rows)))

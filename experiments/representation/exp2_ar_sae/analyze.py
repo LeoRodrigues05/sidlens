@@ -36,11 +36,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
-from sidlens import paths                                                # noqa: E402
 from sidlens.analysis.bootstrap import UserBootstrap                     # noqa: E402
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.data import ar_prompts as P                                 # noqa: E402
-from sidlens.data import timestamps as T                                 # noqa: E402
-from sidlens.hooks.store import StoreReader                              # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
 TEST_STORE = {"next-item_best": "281053", "oneoff_rqvae4cb128": "281054"}
@@ -78,10 +76,10 @@ def check_positions(pos: pd.DataFrame, examples, ckpt: str, n: int, k: int = 50)
     from transformers import AutoTokenizer
     from sidlens.models import ar
     vocab = ar.load_vocab(ckpt)
-    tok = AutoTokenizer.from_pretrained(str(paths.FROZEN_CKPT / "ar" / ckpt), local_files_only=True)
+    tok = AutoTokenizer.from_pretrained(str(ar.checkpoint_dir(ckpt)), local_files_only=True)
     by = pos.set_index(["example_id", "d"]).pos
     for ex in examples[:k]:
-        e = P.encode(ex, tok, vocab, template="eval", with_target=True)
+        e = P.encode(ex, tok, vocab, template=AI.template(ckpt), with_target=True)
         for d in range(n):
             if by[(ex.example_id, d)] != e.predict_pos(0, d):
                 raise ValueError(f"{ex.example_id} d={d}: store pos {by[(ex.example_id, d)]} != predict_pos")
@@ -112,14 +110,18 @@ def auc_columns(A: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a grid weight state (grid:<key>@<state>) instead of --cell")
+    ap.add_argument("--test-capture", type=Path, help="with --ckpt: ar_capture --out dir, test split")
     ap.add_argument("--sae-run", type=Path, required=True, help="train run cell dir")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--layers", default=",".join(map(str, LAYERS)))
     ap.add_argument("--smoke", action="store_true", help="accept a pilot SAE run (code test only)")
     args = ap.parse_args(argv)
-    ckpt = CELLS[args.cell]
-    if (args.sae_run / f"cell-{args.cell:02d}").is_dir():          # a run group: take this cell
+    if (args.cell is None) == (args.ckpt is None) or (args.ckpt and not args.test_capture):
+        ap.error("give --cell, or --ckpt with --test-capture")
+    ckpt = args.ckpt or CELLS[args.cell]
+    if args.cell is not None and (args.sae_run / f"cell-{args.cell:02d}").is_dir():   # a run group
         args.sae_run = args.sae_run / f"cell-{args.cell:02d}"
     layers = tuple(int(x) for x in args.layers.split(","))
     args.out.mkdir(parents=True, exist_ok=True)
@@ -130,14 +132,15 @@ def main(argv=None) -> int:
     tin = json.loads((args.sae_run / "inputs.json").read_text())
     if tin["checkpoint"] != f"ar/{ckpt}" or ((tin.get("pilot_epochs") or tin.get("pilot_max_train_tokens")) and not args.smoke):
         raise ValueError(f"{args.sae_run} is not a full training run for {ckpt}")
-    st = StoreReader(paths.DERIVED / "ar_capture" / TEST_STORE[ckpt] / "capture" / "store", verify=True)
+    st = AI.capture_store(args.test_capture or TEST_STORE[ckpt], ckpt, "test")
     variant = st.meta["variant"]
     n = int(variant.split("_")[1][0])
-    examples = P.load_examples(variant, "next-item", "test")
+    in_store = set(st.rows.example_id)                # a pilot capture holds the first rows only
+    examples = [e for e in AI.examples(ckpt, "test") if e.example_id in in_store]
     by = {e.example_id: e for e in examples}
     pos = positions(st.rows, examples, n)
     check_positions(pos, examples, ckpt, n)
-    rows_t, _ = T.ar_row_times(examples)
+    rows_t, _ = AI.row_times(ckpt, examples, "test")
     rows_t = rows_t.set_index("example_id")
     codes = {e.example_id: ([P.parse_sid(s, n) for s in e.history_sids], P.parse_sid(e.target_sids[0], n))
              for e in examples}
@@ -154,7 +157,7 @@ def main(argv=None) -> int:
         pos[pos.half == 0].user_id.nunique()), "heldout_users": int(pos[pos.half == 1].user_id.nunique())}
 
     # item embeddings for Q3
-    emb = np.load(paths.FROZEN_DATA / "embeddings" / f"{P.PRIMARY_CATEGORY}.emb-qwen-td.npy").astype(np.float32)
+    emb = AI.embeddings(ckpt, np.float32)
     mu = emb.mean(0)
     U, S, Vt = np.linalg.svd(emb - mu, full_matrices=False)
     pc = (emb - mu) @ Vt[:64].T
@@ -252,6 +255,10 @@ def main(argv=None) -> int:
                 j0 = int(np.flatnonzero(cand == f)[0])
                 near = sorted(pool, key=lambda j: abs(meanact[j] - meanact[j0]))
                 near = [j for j in near if j not in used][:20]
+                if not near and args.smoke:      # a pilot SAE (one epoch, a few rows) has no AUC-neutral pool
+                    near = [j for j in range(len(cand)) if cand[j] not in S and j not in used][:20]
+                if not near:
+                    raise RuntimeError(f"L{L}: no control latent left for latent {f}")
                 pick = int(rng.choice(near))
                 used.add(pick)
                 cs.append(int(cand[pick]))
@@ -307,7 +314,7 @@ def main(argv=None) -> int:
     pd.DataFrame(res).to_csv(args.out / "observational.csv", index=False)
     (args.out / "selection.json").write_text(json.dumps(selection))
     (args.out / "inputs.json").write_text(json.dumps({"cell": ckpt, "sae_run": str(args.sae_run),
-                                                      "test_store": TEST_STORE[ckpt], "seed": SEED}, indent=1))
+                                                      "test_store": str(args.test_capture or TEST_STORE[ckpt]), "seed": SEED}, indent=1))
     log(f"done in {time.time() - t0:.0f}s")
     return 0
 

@@ -1,5 +1,12 @@
 #!/usr/bin/env python
-"""Seven declared reveal conditions on one frozen depth-three checkpoint."""
+"""Seven declared reveal conditions on one frozen depth-three checkpoint (or one grid weight state).
+
+Grid states (`--ckpt grid:<key>@<state>`, depth 3): the same seven conditions
+under `matched_decode`, plus the six fixed orders under the run's own search
+(`grid_fixed`: `grid.decode_diff` with that reveal order, catalog-legal codes
+at every step; order 012 is the run's test decoder). The archive check is
+replaced by `diff_setup.check`. Summaries: `../exp1_matched_beam/summarize_grid.py`.
+"""
 
 from __future__ import annotations
 
@@ -82,7 +89,8 @@ def validate_orders(model, hidden, axes, buckets):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--cell-index", type=int, choices=CELL_INDICES, required=True)
+    ap.add_argument("--cell-index", type=int, choices=CELL_INDICES)
+    ap.add_argument("--ckpt", help="a depth-3 next-item DiffGRM grid weight state instead of --cell-index")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--beam-widths", nargs="+", type=int, default=[64])
     ap.add_argument("--limit", type=int, default=0)
@@ -97,22 +105,38 @@ def main():
         raise FileExistsError(f"existing results: {args.out}")
     if not torch.cuda.is_available():
         raise RuntimeError("run inside a GPU sbatch allocation")
+    if (args.cell_index is None) == (args.ckpt is None):
+        raise ValueError("give exactly one of --cell-index or --ckpt")
     axes = conditions(args.beam_widths)
     configure_precision()
     started = time.perf_counter()
-    entry = load_runtime()[cell_ids()[args.cell_index]]
+    grid_setup = None
+    if args.ckpt:
+        from sidlens.grid import decode_diff as DD, diff_setup as DS
+        grid_setup = DS.load(args.ckpt, device="cuda")
+        ckpt_name, entry, cohort = args.ckpt, grid_setup.compat, grid_setup.cohort
+        model, model_report = grid_setup.model, grid_setup.report
+        axes += [(b, "grid_fixed", order) for b, p, order in axes if p == "fixed"]
+    else:
+        ckpt_name = cell_ids()[args.cell_index]
+        entry = load_runtime()[ckpt_name]
+        cohort = load_eval_cohort(entry)
+        if len(cohort) != 6297:
+            raise ValueError("declared evaluation cohort changed")
     if entry["status"] != "trained" or entry["task"] != "next1" or entry["config"]["n_digit"] != 3:
         raise ValueError("unexpected checkpoint status/depth")
     if sha256_file(Path(entry["ckpt_path"])) != entry["ckpt_sha256"]:
         raise ValueError("checkpoint hash drift")
-    cohort = load_eval_cohort(entry)
     n = min(args.limit, len(cohort)) if args.limit else len(cohort)
-    if len(cohort) != 6297:
-        raise ValueError("declared evaluation cohort changed")
-    model, model_report = diffusion.load(entry, device="cuda")
-    print(f"[load] {cell_ids()[args.cell_index]} users={n} conditions={len(axes)}", flush=True)
+    if grid_setup is None:
+        model, model_report = diffusion.load(entry, device="cuda")
+    print(f"[load] {ckpt_name} users={n} conditions={len(axes)}", flush=True)
     validation = {}
-    if args.validate:
+    if grid_setup is not None:
+        validation["grid_checks"] = DS.check(grid_setup, device="cuda")
+        if not validation["grid_checks"]["ok"]:
+            raise RuntimeError(f"grid checks failed: {json.dumps(validation, default=str)[:1500]}")
+    if args.validate and grid_setup is None:
         count = min(8, n)
         validation["model"] = verify_model_and_decoder(
             model, torch.from_numpy(cohort.histories[:count]).to("cuda"),
@@ -123,7 +147,7 @@ def main():
                              torch.from_numpy(cohort.history_mask[i:i + args.batch_size]).to("cuda")).cpu()
             for i in range(0, n, args.batch_size)
         ])[:n]
-    if args.validate:
+    if args.validate and grid_setup is None:
         validation["order_invariance"] = validate_orders(model, hidden, axes, cohort.sid_buckets)
         print("[validation] model and all order batch/chunk checks passed", flush=True)
     shape = (len(axes), n)
@@ -150,15 +174,22 @@ def main():
         decoder_rows = 0
         for offset in range(0, n, args.batch_size):
             end = min(offset + args.batch_size, n)
-            decoded = decode(model, hidden[offset:end].to("cuda"), beam_width=beam,
-                             policy=policy, order=order, top_k=10, allowed_sids=cohort.sid_buckets,
-                             decoder_chunk_size=args.decoder_chunk_size)
-            data["codes"][ci, offset:end] = decoded.codes.cpu().numpy()
-            data["scores"][ci, offset:end] = decoded.scores.cpu().numpy()
-            data["counts"][ci, offset:end] = decoded.counts.cpu().numpy()
-            for field in path_fields:
-                data[field][ci, offset:end] = getattr(decoded, field).cpu().numpy()
-            decoder_rows += (end - offset) * (1 + sum(decoded.beam_sizes[:-1]))
+            if policy == "grid_fixed":                       # the run's own search, this reveal order
+                hyps = DD.decode(model, None, grid_setup.catalog, beam_size=beam, top_k=10,
+                                 reveal_order=list(order), encoded=hidden[offset:end].to("cuda"))
+                (data["codes"][ci, offset:end], data["scores"][ci, offset:end],
+                 data["counts"][ci, offset:end]) = DS.as_arrays(hyps, 3)
+                decoded = None
+            else:
+                decoded = decode(model, hidden[offset:end].to("cuda"), beam_width=beam,
+                                 policy=policy, order=order, top_k=10, allowed_sids=cohort.sid_buckets,
+                                 decoder_chunk_size=args.decoder_chunk_size)
+                data["codes"][ci, offset:end] = decoded.codes.cpu().numpy()
+                data["scores"][ci, offset:end] = decoded.scores.cpu().numpy()
+                data["counts"][ci, offset:end] = decoded.counts.cpu().numpy()
+                for field in path_fields:
+                    data[field][ci, offset:end] = getattr(decoded, field).cpu().numpy()
+                decoder_rows += (end - offset) * (1 + sum(decoded.beam_sizes[:-1]))
             for row in range(offset, end):
                 rank, metrics = evaluate_prediction(data["codes"][ci, row, :data["counts"][ci, row]],
                                                     cohort.target_sids[row], cohort.target_item_ids[row], cohort.sid_buckets)
@@ -168,17 +199,19 @@ def main():
         elapsed = time.perf_counter() - begin
         diagnostics.append({"beam_width": beam, "policy": policy, "order": order,
             "label": label(policy, order), "seconds": elapsed, "users_per_second": n / elapsed,
-            "decoder_rows": decoder_rows, "active_beam_sizes": list(decoded.beam_sizes),
+            "decoder_rows": decoder_rows, "active_beam_sizes": list(decoded.beam_sizes) if decoded else None,
             "peak_cuda_allocated_bytes": torch.cuda.max_memory_allocated(),
             "rows_with_ten_predictions": int((data["counts"][ci] == 10).sum()),
             "mean_list_length": float(data["counts"][ci].mean()),
             **{field: int(data[field][ci].sum()) for field in path_fields},
             "metrics": {name: float(data["metrics"][ci, :, mi].mean()) for mi, name in enumerate(METRICS)}})
         print(f"[condition] beam={beam} {label(policy, order)} users={n} seconds={elapsed:.2f}", flush=True)
-    validation["archive"] = check_archive(args.out, entry, cohort, axes, data, args.archive / f"cell-{args.cell_index:02d}")
+    if grid_setup is None:
+        validation["archive"] = check_archive(args.out, entry, cohort, axes, data, args.archive / f"cell-{args.cell_index:02d}")
     validation["status"] = "passed"
     result = {
-        "experiment": "controlled-exp2-fixed-orders", "checkpoint": cell_ids()[args.cell_index],
+        "experiment": "controlled-exp2-fixed-orders", "checkpoint": ckpt_name,
+        **({k: entry[k] for k in ("grid_key", "grid_state", "dataset")} if grid_setup else {}),
         "cell_index": args.cell_index, "snapshot": (paths.MANIFESTS / "CURRENT").read_text().strip(),
         "quantizer": entry["quantizer"], "depth": 3, "codebook_size": entry["codebook_size"],
         "n_users": n, "full_cohort": n == len(cohort), "cohort_sha256": cohort.cohort_sha256,

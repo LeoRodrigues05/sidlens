@@ -47,9 +47,10 @@ from sidlens.data import ar_prompts as P                                # noqa: 
 from sidlens.data.sids import SidTable, load_item2id                    # noqa: E402
 from sidlens.interventions import history as Hi                         # noqa: E402
 from sidlens.interventions.residual import Patch, patch_residual        # noqa: E402
+from sidlens.interventions.runner import length_buckets                 # noqa: E402
 from sidlens.interventions.scoring import MEASURES, DigitScorer         # noqa: E402
 from sidlens.models import ar                                           # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod        # noqa: E402
+from sidlens.provenance import hashing                                  # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")         # cell-00, cell-01
 SEED = 20260927
@@ -62,14 +63,8 @@ CONTROLS = {"noop_pre": ("pre", "clean", "corrupted"),      # kind: (group, sour
 
 # ------------------------------------------------------------------ inputs --
 def checkpoint_sha(ckpt: str) -> str:
-    """Hash the weights and compare with the snapshot; refuse on mismatch.
-    Same check as scripts/activations/ar_capture.py::checkpoint_sha."""
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Weights hash, checked against the freeze manifest or the retrain registry."""
+    return ar.checkpoint_sha(ckpt)
 
 
 def ids_sha(e: P.Encoded) -> str:
@@ -104,20 +99,41 @@ class Row:
 class Runner:
     """Fixed-shape forwards returning per-digit scores and code logits."""
 
-    def __init__(self, model, scorer: DigitScorer, pad_id: int, t_pad: int, rows: int):
+    def __init__(self, model, scorer: DigitScorer, pad_id: int, t_pad: int, rows: int, buckets=None):
         self.model, self.scorer, self.pad_id = model, scorer, pad_id
         self.t_pad, self.B = t_pad, rows
+        # Grid runs: pad each row to its length bucket (see interventions.runner).
+        self.buckets = None if buckets is None else sorted({int(b) for b in buckets})
         self.dev = next(model.parameters()).device
         self.n = scorer.n_digits
         self.n_forwards = 0
 
-    def _tensors(self, encs: list[P.Encoded]):
+    def bucket_len(self, n: int) -> int:
+        if self.buckets is None:
+            return self.t_pad
+        for b in self.buckets:
+            if n < b:                       # at least one pad token (see length_buckets)
+                return b
+        raise ValueError(f"sequence of {n} tokens does not fit below any bucket {self.buckets}")
+
+    def batches(self, indices, length_of) -> list[list[int]]:
+        """Chunks of at most B indices within one bucket (consecutive chunks without buckets)."""
+        indices = list(indices)
+        if self.buckets is None:
+            return [indices[s:s + self.B] for s in range(0, len(indices), self.B)]
+        groups: dict[int, list[int]] = {}
+        for i in indices:
+            groups.setdefault(self.bucket_len(length_of(i)), []).append(i)
+        return [g[s:s + self.B] for _, g in sorted(groups.items()) for s in range(0, len(g), self.B)]
+
+    def _tensors(self, encs: list[P.Encoded], t_pad: int | None = None):
+        t_pad = self.t_pad if t_pad is None else t_pad
         c = P.collate(encs, pad_id=self.pad_id, side="right")
         if int(c["offset"].abs().max()) != 0:
             raise AssertionError("right padding must leave every offset at 0")
-        extra = self.t_pad - c["input_ids"].shape[1]
+        extra = t_pad - c["input_ids"].shape[1]
         if extra < 0:
-            raise ValueError(f"sequence longer than T_pad={self.t_pad}")
+            raise ValueError(f"sequence longer than T_pad={t_pad}")
         pad = torch.nn.functional.pad
         # Same convention as collate(): pad id, mask 0, position 1.
         return (pad(c["input_ids"], (0, extra), value=self.pad_id).to(self.dev),
@@ -144,8 +160,16 @@ class Runner:
             raise ValueError(f"batch of {real} rows, capacity {self.B}")
         if capture and any(r.patches for r in rows):
             raise ValueError("capture and patch in one forward would record patched values")
+        t_pad = self.t_pad
+        if self.buckets is not None:
+            lens = {self.bucket_len(len(r.enc)) for r in rows}
+            if len(lens) > 1:
+                if capture or caches:
+                    raise ValueError("a forward that captures or patches must stay in one length bucket")
+                return self._split(rows)
+            t_pad = lens.pop()
         encs = [r.enc for r in rows] + [rows[0].enc] * (self.B - real)
-        ids, mask, pos = self._tensors(encs)
+        ids, mask, pos = self._tensors(encs, t_pad)
         pred = torch.tensor([[e.predict_pos(0, d) for d in range(self.n)] for e in encs],
                             device=self.dev)
         patches = self._patches(rows, caches)
@@ -160,6 +184,23 @@ class Runner:
         scores = self.scorer.score(logits, targets)
         code_logits = [self.scorer.code_logits(logits, d).float().cpu() for d in range(self.n)]
         return scores, code_logits, cap
+
+    def _split(self, rows: list[Row]):
+        """One fixed-shape forward per length bucket, merged back into row order."""
+        groups: dict[int, list[int]] = {}
+        for i, r in enumerate(rows):
+            groups.setdefault(self.bucket_len(len(r.enc)), []).append(i)
+        scores = {k: np.empty((len(rows), self.n), dtype=np.float64 if k.startswith("logp") else np.int64)
+                  for k in MEASURES}
+        parts = []
+        for _, idx in sorted(groups.items()):
+            s, cl, _ = self.forward([rows[i] for i in idx])
+            for k in MEASURES:
+                scores[k][idx] = s[k]
+            parts.append((idx, cl))
+        inverse = torch.as_tensor(np.argsort([i for idx, _ in parts for i in idx]))
+        code_logits = [torch.cat([cl[d] for _, cl in parts])[inverse] for d in range(self.n)]
+        return scores, code_logits, None
 
 
 def records(rows: list[Row], scores: dict, batch: int, n: int) -> list[dict]:
@@ -241,8 +282,7 @@ def part_b(runner: Runner, examples, clean, corr, controls, n_layers, n, log,
     recs, ctrl_recs = [], []
     inv = {"clean_vs_part_a": 0.0, "n_compared": 0}
     batch, t0 = 0, time.time()
-    for start in range(0, len(examples), runner.B):
-        idx = list(range(start, min(len(examples), start + runner.B)))
+    for idx in runner.batches(range(len(examples)), lambda i: len(clean[i])):
         cl_rows = [Row(clean[i], slot=j, meta={"i": i, "condition": "clean", "layer": -1,
                                                 "group": "", "source": ""}) for j, i in enumerate(idx)]
         co_rows = [Row(corr[i], slot=j, meta={"i": i, "condition": "corrupted", "layer": -1,
@@ -293,7 +333,7 @@ def part_b(runner: Runner, examples, clean, corr, controls, n_layers, n, log,
                                   "reference": refname, "max_abs_diff_code_logits": d,
                                   "exact": d == 0.0, "batch": batch})
             batch += 1
-        log(f"[B] {idx[-1] + 1}/{len(examples)} rows, {runner.n_forwards} forwards, "
+        log(f"[B] {max(idx) + 1}/{len(examples)} rows, {runner.n_forwards} forwards, "
             f"{time.time() - t0:.0f}s")
     return recs, ctrl_recs, inv
 
@@ -303,8 +343,11 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cell", type=int, choices=range(len(CELLS)),
                     help="0 = next-item_best, 1 = oneoff_rqvae4cb128 (sbatch array index)")
-    ap.add_argument("--ckpt", choices=CELLS)
-    ap.add_argument("--template", default="eval", choices=P.TEMPLATES)
+    ap.add_argument("--ckpt", choices=ar.known_checkpoints(),
+                    help="a frozen checkpoint, a registered retrain (retrain/<run>/<variant>) "
+                         "or a grid weight state (grid:<key>@<state>)")
+    ap.add_argument("--template", default="eval", choices=P.TEMPLATES,
+                    help="frozen checkpoints only; grid models always get OneDiffRec's prompt (v3)")
     ap.add_argument("--parts", default="A,B")
     ap.add_argument("--limit", type=int, default=None, help="first N rows (pilot only)")
     ap.add_argument("--rows", type=int, default=128, help="fixed batch rows B")
@@ -342,37 +385,56 @@ def main(argv=None) -> int:
     vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(str(paths.FROZEN_CKPT / "ar" / ckpt), local_files_only=True)
-    examples = P.load_examples(vocab.variant, "next-item", "test")
-    table = SidTable.load(vocab.variant)
-    validation = {"table": P.check_against_table(examples, table),
-                  "archive": P.check_against_archive(examples),
-                  "vocab_vs_table": ar.validate_against(vocab, table)}
+    tok = AutoTokenizer.from_pretrained(str(ar.checkpoint_dir(ckpt)), local_files_only=True)
+    grid_info, buckets = {}, None
+    if ar.is_grid(ckpt):
+        # A grid run: its own rows, table and item ids; OneDiffRec's current prompt.
+        from sidlens.grid import inputs as GI
+        gin = GI.ArSetup(ckpt, "test", tok, vocab, task="next-item")
+        examples, table, item2id, grid_info = gin.examples, gin.table, gin.item2id, gin.info
+        validation, args.template = gin.validation, gin.template
+    else:
+        examples = P.load_examples(vocab.variant, "next-item", "test")
+        table = SidTable.load(vocab.variant)
+        validation = {"table": P.check_against_table(examples, table),
+                      "archive": P.check_against_archive(examples),
+                      "vocab_vs_table": ar.validate_against(vocab, table)}
+        item2id = load_item2id(P.PRIMARY_CATEGORY)
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation, default=str)[:2000]}")
     clean_all = [P.encode(ex, tok, vocab, template=args.template, with_target=True) for ex in examples]
     t_pad = -(-max(len(e) for e in clean_all) // 8) * 8
     if args.limit:
         examples, clean_all = examples[:args.limit], clean_all[:args.limit]
-    pool = Hi.ControlPool(table, load_item2id(P.PRIMARY_CATEGORY))
+    if grid_info:
+        examples, clean_all = GI.sort_by_length(examples, clean_all)
+        buckets = length_buckets([len(e) for e in clean_all])
+        t_pad = buckets[-1]
+    pool = Hi.ControlPool(table, item2id)
     scorer = DigitScorer(vocab, table)
 
-    csv = P.csv_path(vocab.variant, "next-item", "test")
-    arch = P.archive_path(vocab.variant, "next-item")
     sha = checkpoint_sha(ckpt)
+    if grid_info:
+        provenance = {"csv": grid_info["csv"], "csv_sha256": grid_info["csv_sha256"],
+                      "sem_ids": str(table.source), "sem_ids_sha256": hashing.sha256_file(table.source)}
+    else:
+        csv = P.csv_path(vocab.variant, "next-item", "test")
+        arch = P.archive_path(vocab.variant, "next-item")
+        provenance = {"csv": str(csv.relative_to(paths.WORK)), "csv_sha256": hashing.sha256_file(csv),
+                      "sem_ids": str(table.source.relative_to(paths.WORK)),
+                      "sem_ids_sha256": hashing.sha256_file(table.source),
+                      "archive": str(arch.relative_to(paths.WORK)), "archive_sha256": hashing.sha256_file(arch)}
     inputs = {"checkpoint": f"ar/{ckpt}", "checkpoint_sha256": sha,
-              "added_tokens_sha256": hashing.sha256_file(paths.FROZEN_CKPT / "ar" / ckpt / "added_tokens.json"),
+              "added_tokens_sha256": hashing.sha256_file(ar.checkpoint_dir(ckpt) / "added_tokens.json"),
               "variant": vocab.variant.name, "n_digits": n,
               "codes_per_digit": [vocab.n_codes(d) for d in range(n)],
-              "csv": str(csv.relative_to(paths.WORK)), "csv_sha256": hashing.sha256_file(csv),
-              "sem_ids": str(table.source.relative_to(paths.WORK)),
-              "sem_ids_sha256": hashing.sha256_file(table.source),
-              "archive": str(arch.relative_to(paths.WORK)), "archive_sha256": hashing.sha256_file(arch),
+              **provenance,
               "template": args.template, "split": "test", "task": "next-item",
               "n_rows": len(examples), "n_users": len({e.user_id for e in examples}),
               "limited": args.limit, "t_pad": t_pad, "batch_rows": args.rows, "seed": SEED,
               "parts": sorted(parts), "groups": list(GROUPS), "control_layers": list(CONTROL_LAYERS),
-              "teacher_forced": True, "padding": "right, fixed shape"}
+              "teacher_forced": True, "padding": "right, fixed shape",
+              **({"buckets": buckets, **grid_info} if grid_info else {})}
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1))
     (args.out / "arguments.json").write_text(json.dumps({k: str(v) for k, v in vars(args).items()},
                                                         indent=1))
@@ -385,7 +447,7 @@ def main(argv=None) -> int:
                    "torch": torch.__version__,
                    "transformers": __import__("transformers").__version__})
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1))
-    runner = Runner(model, scorer, tok.pad_token_id, t_pad, args.rows)
+    runner = Runner(model, scorer, tok.pad_token_id, t_pad, args.rows, buckets=buckets)
     n_layers = model.config.num_hidden_layers
 
     clean_logits_a = None
@@ -440,8 +502,11 @@ def main(argv=None) -> int:
         k = min(args.fp32_check_rows, len(examples))
         model.to(torch.float32)
         s32, _, _ = runner.forward([Row(clean_all[i]) for i in range(k)])
-        want = ref[ref.example_id.isin([e.example.example_id for e in clean_all[:k]])] \
-            .sort_values(["row", "digit"])
+        # Order the reference like the first k rows (file order for frozen runs,
+        # length order for grid runs).
+        order = {e.example.example_id: j for j, e in enumerate(clean_all[:k])}
+        want = ref[ref.example_id.isin(order)]
+        want = want.assign(_o=want.example_id.map(order)).sort_values(["_o", "digit"])
         got = s32["logp_codes"].reshape(-1)
         validation["fp32_vs_" + args.dtype] = {
             "rows": k, "max_abs_diff_logp_codes": float(np.abs(got - want.logp_codes.to_numpy()).max()),

@@ -38,6 +38,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from sidlens import paths                                                # noqa: E402
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.hooks.store import StoreReader                              # noqa: E402
 from sidlens.models import ar                                            # noqa: E402
@@ -124,15 +125,19 @@ def main(argv=None) -> int:
     store = StoreReader(args.capture / "capture" / "store", verify=True)
     meta = store.meta
     ckpt = meta["model"].split("/", 1)[1]
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    if meta["checkpoint_sha256"] != want or meta["template"] != "eval" or meta["split"] != "test":
+    if ar.is_grid(ckpt):                     # a grid weight state: the registry's hash, the v3 prompt
+        want = ar.checkpoint_sha(ckpt)
+    else:
+        man = manifest_mod.load()
+        want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
+    if meta["checkpoint_sha256"] != want or meta["template"] != AI.template(ckpt) or meta["split"] != "test":
         raise RuntimeError(f"store meta does not match the protocol: {meta}")
     vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
-    examples = P.load_examples(vocab.variant, "next-item", "test")
-    ex_by_id = {e.example_id: e for e in examples}
     rows = store.rows
+    in_store = set(rows.example_id)                   # a pilot capture holds the first rows only
+    examples = [e for e in AI.examples(ckpt, "test") if e.example_id in in_store]
+    ex_by_id = {e.example_id: e for e in examples}
     log(f"store ok: {ckpt} rows={len(rows)} sites={len(store.sites)}")
 
     # ---- positions and labels per example ---------------------------------------
@@ -165,8 +170,8 @@ def main(argv=None) -> int:
 
     # ---- unembedding (tied) and final norm --------------------------------------
     from safetensors import safe_open
-    cfg = json.loads((paths.FROZEN_CKPT / "ar" / ckpt / "config.json").read_text())
-    with safe_open(str(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors"), "pt") as fh:
+    cfg = json.loads((ar.checkpoint_dir(ckpt) / "config.json").read_text())
+    with safe_open(str(AI.weights_file(ckpt)), "pt") as fh:
         emb = fh.get_tensor("model.embed_tokens.weight")
         norm_w = fh.get_tensor("model.norm.weight").float().to(args.device)
     E = {d: emb[torch.as_tensor(vocab.ids(d))].float().to(args.device) for d in range(n)}
@@ -180,7 +185,8 @@ def main(argv=None) -> int:
     if args.layers != "all":
         keep = {int(x) for x in args.layers.split(",")}
         sites = [s for s in sites if s == "model.norm" or int(s.split(".")[-1]) in keep]
-    inputs = {"capture": str(args.capture.relative_to(paths.WORK)), "store_meta": meta, "checkpoint": ckpt,
+    inputs = {"capture": str(args.capture.relative_to(paths.WORK)) if args.capture.is_relative_to(paths.WORK)
+              else str(args.capture), "store_meta": meta, "checkpoint": ckpt,
               "variant": vocab.variant.name, "n_digits": n, "n_examples": len(order),
               "n_users": int(len(set(users))), "sites": sites, "lambdas": LAMBDAS, "iters": args.iters,
               "seed": SEED, "probes": PROBES, "shuffle_layers": SHUFFLE_LAYERS,

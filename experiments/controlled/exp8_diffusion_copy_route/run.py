@@ -83,11 +83,14 @@ def score_fixed(model, enc, cache, jobs, n, n_layers, S, enc_mask):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a next-item DiffGRM grid weight state (grid:<key>@<state>) instead of --cell")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
+    if (args.cell is None) == (args.ckpt is None):
+        ap.error("give exactly one of --cell or --ckpt")
     global DEV
     DEV = args.device
     args.out.mkdir(parents=True, exist_ok=True)
@@ -98,18 +101,30 @@ def main(argv=None) -> int:
     torch.backends.cudnn.allow_tf32 = False
     torch.use_deterministic_algorithms(True, warn_only=True)
 
-    ckpt_id = CELLS[args.cell]
-    entry = load_runtime()[ckpt_id]
+    grid_setup = None
+    if args.ckpt:                    # a grid run: its own cohort, table and model (sidlens.grid.diff_setup)
+        from sidlens.grid import diff_setup as DS
+        grid_setup = DS.load(args.ckpt, device=DEV)
+        ckpt_id, entry, cohort = args.ckpt, grid_setup.compat, grid_setup.cohort
+        model, report = grid_setup.model, grid_setup.report
+    else:
+        ckpt_id = CELLS[args.cell]
+        entry = load_runtime()[ckpt_id]
+        cohort = load_eval_cohort(entry)
+        model, report = diffusion.load(entry, device=DEV)
     if sha256_file(Path(entry["ckpt_path"])) != entry["ckpt_sha256"]:
         raise RuntimeError("checkpoint hash drift")
-    cohort = load_eval_cohort(entry)
-    model, report = diffusion.load(entry, device=DEV)
     n, n_layers, S = int(model.n_digit), len(model.decoder_blocks), cohort.histories.shape[1]
     N = min(args.limit, len(cohort)) if args.limit else len(cohort)
 
-    validation = {"model_report_ok": report["ok"], "V1_exp1_pilot_checks": exp1_validate()(
-        model, torch.from_numpy(cohort.histories[:8]).to(DEV), torch.from_numpy(cohort.history_mask[:8]).to(DEV),
-        cohort.sid_buckets, matched_decode)}
+    if grid_setup is not None:       # no exp1 archive: the run's own lists (V2a) and the scorer check
+        validation = {"model_report_ok": report["ok"], "V1_grid_checks": DS.check(grid_setup, device=DEV)}
+        if not validation["V1_grid_checks"]["ok"]:
+            raise RuntimeError(f"grid checks failed: {json.dumps(validation, default=str)[:1500]}")
+    else:
+        validation = {"model_report_ok": report["ok"], "V1_exp1_pilot_checks": exp1_validate()(
+            model, torch.from_numpy(cohort.histories[:8]).to(DEV), torch.from_numpy(cohort.history_mask[:8]).to(DEV),
+            cohort.sid_buckets, matched_decode)}
     h8, m8 = cohort.histories[:8], cohort.history_mask[:8]
     plain = diffusion.encode(model, torch.from_numpy(h8).to(DEV), torch.from_numpy(m8).to(DEV))
     viahook = encode_masked(model, h8, m8, [None] * 8)
@@ -126,7 +141,8 @@ def main(argv=None) -> int:
     (args.out / "inputs.json").write_text(json.dumps({
         "checkpoint": ckpt_id, "checkpoint_sha256": entry["ckpt_sha256"], "sem_ids": entry["sem_ids_name"],
         "cohort_sha256": cohort.cohort_sha256, "n_users": N, "limited": args.limit, "n_digit": n,
-        "device": DEV, "torch": torch.__version__}, indent=1))
+        "device": DEV, "torch": torch.__version__,
+        **({k: entry[k] for k in ("grid_key", "grid_state", "dataset")} if grid_setup else {})}, indent=1))
     print(f"inputs ok: {ckpt_id} users={N}; V1 passed; V2 {validation['V2_noop_encoder_mask']}, "
           f"{validation['V2_noop_cross_mask']}", flush=True)
 

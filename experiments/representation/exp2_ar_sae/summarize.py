@@ -147,10 +147,12 @@ def main(argv=None) -> int:
     ap.add_argument("--analysis", type=Path, required=True)
     ap.add_argument("--causal", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--cell-names", default="cell-00,cell-01",
+                    help="subfolders of each stage; '.' = the stage folders are one cell (grid runs)")
     args = ap.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=False)
     fid, obs, recs, variants = {}, [], [], []
-    for c in ("cell-00", "cell-01"):
+    for c in args.cell_names.split(","):
         tin = json.loads((args.train / c / "inputs.json").read_text())
         v = tin["variant"]
         variants.append(v)
@@ -196,7 +198,8 @@ def main(argv=None) -> int:
         L.append(f"| {r.variant} | {r.q} | {r.layer} | {r.estimand} | {lat} | {r.est:.3f} | {ci} |")
     (args.out / "report.md").write_text("\n".join(L) + "\n")
     (args.out / "result.json").write_text(json.dumps({"figures": figs, "inputs_sha256": {
-        str(p): sha256_file(p) for g in (args.causal, args.analysis) for p in sorted(g.glob("cell-*/*.parquet"))}},
+        str(p): sha256_file(p) for g in (args.causal, args.analysis) for c in args.cell_names.split(",")
+        for p in sorted((g / c).glob("*.parquet"))}},
         indent=1))
     (args.out / "summarize.py.source").write_text(Path(__file__).read_text())
     print(f"wrote {args.out}")

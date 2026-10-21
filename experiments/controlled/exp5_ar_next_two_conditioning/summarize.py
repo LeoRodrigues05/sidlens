@@ -73,10 +73,14 @@ def main(argv=None) -> int:
     for (m, dd), g in a[(a.condition == "item1") & (a.slot == 1)].groupby(["m", "digit"]):
         add("A3 item1 m -> slot1", boot.mean(g.user_id, g.delta), slot=1, d=int(dd), m=int(m))
     # copy check: does item 1 already share item 2's first d digits?
-    ex = {e.example_id: e for e in P.load_examples(inputs["variant"], "two-item", "test")}
+    if (d / "rows.parquet").exists():
+        rws = pd.read_parquet(d / "rows.parquet")
+        targets = dict(zip(rws.example_id, zip(rws.target_sid0, rws.target_sid1)))
+    else:
+        targets = {e.example_id: e.target_sids for e in P.load_examples(inputs["variant"], "two-item", "test")}
     share = {}
-    for eid, e in ex.items():
-        s0, s1 = (P.parse_sid(s, n) for s in e.target_sids)
+    for eid, ts in targets.items():
+        s0, s1 = (P.parse_sid(s, n) for s in ts)
         k = 0
         while k < n and s0[k] == s1[k]:
             k += 1

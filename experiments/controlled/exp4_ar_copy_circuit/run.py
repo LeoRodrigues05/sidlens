@@ -32,10 +32,10 @@ from sidlens import paths                                                # noqa:
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.data.sids import SidTable, load_item2id                     # noqa: E402
 from sidlens.interventions import history as Hi                          # noqa: E402
-from sidlens.interventions.runner import FixedShapeRunner, Job, max_diff, records  # noqa: E402
+from sidlens.interventions.runner import FixedShapeRunner, Job, length_buckets, max_diff, records  # noqa: E402
 from sidlens.interventions.scoring import DigitScorer                    # noqa: E402
 from sidlens.models import ar                                            # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod         # noqa: E402
+from sidlens.provenance import hashing                                   # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
 SEED = 20260927
@@ -44,12 +44,8 @@ N_CONTROL_SETS = 20
 
 
 def checkpoint_sha(ckpt: str) -> str:
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Weights hash, checked against the freeze manifest or the retrain registry."""
+    return ar.checkpoint_sha(ckpt)
 
 
 def user_half(user_id: str) -> int:
@@ -110,7 +106,9 @@ class Stream:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
-    ap.add_argument("--ckpt", choices=CELLS)
+    ap.add_argument("--ckpt", choices=ar.known_checkpoints(),
+                    help="a frozen checkpoint, a registered retrain (retrain/<run>/<variant>) "
+                         "or a grid weight state (grid:<key>@<state>)")
     ap.add_argument("--split", default="valid", choices=("valid", "test"))
     ap.add_argument("--parts", default="R,K,H")
     ap.add_argument("--limit", type=int, default=None, help="first N rows (pilot only)")
@@ -145,26 +143,43 @@ def main(argv=None) -> int:
     vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(str(paths.FROZEN_CKPT / "ar" / ckpt), local_files_only=True)
-    examples = P.load_examples(vocab.variant, "next-item", args.split)
-    table = SidTable.load(vocab.variant)
-    validation = {"table": P.check_against_table(examples, table),
-                  "vocab_vs_table": ar.validate_against(vocab, table)}
-    if args.split == "test":
-        validation["archive"] = P.check_against_archive(examples)
+    tok = AutoTokenizer.from_pretrained(str(ar.checkpoint_dir(ckpt)), local_files_only=True)
+    grid_info, buckets = {}, None
+    if ar.is_grid(ckpt):
+        # A grid run: its own prepared rows, SID table and item ids, and OneDiffRec's
+        # current prompt (checked token for token); no archive exists, so the rows
+        # are checked against the run's prepared manifest instead.
+        from sidlens.grid import inputs as GI
+        gin = GI.ArSetup(ckpt, args.split, tok, vocab, task="next-item")
+        examples, table, item2id, template = gin.examples, gin.table, gin.item2id, gin.template
+        validation, grid_info, csv = gin.validation, gin.info, gin.csv
+    else:
+        examples = P.load_examples(vocab.variant, "next-item", args.split)
+        table = SidTable.load(vocab.variant)
+        validation = {"table": P.check_against_table(examples, table),
+                      "vocab_vs_table": ar.validate_against(vocab, table)}
+        if args.split == "test":
+            validation["archive"] = P.check_against_archive(examples)
+        item2id, template = load_item2id(P.PRIMARY_CATEGORY), "eval"
+        csv = P.csv_path(vocab.variant, "next-item", args.split)
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation, default=str)[:2000]}")
-    clean = [P.encode(ex, tok, vocab, template="eval", with_target=True) for ex in examples]
+    clean = [P.encode(ex, tok, vocab, template=template, with_target=True) for ex in examples]
     t_pad = -(-max(len(e) for e in clean) // 8) * 8
     if args.limit:
         examples, clean = examples[:args.limit], clean[:args.limit]
+    if grid_info:
+        # Histories of up to 50 items: pad each row to its length bucket, not the split's longest.
+        examples, clean = GI.sort_by_length(examples, clean)
+        buckets = length_buckets([len(e) for e in clean])
+        t_pad = buckets[-1]
     info = [row_info(e, n) for e in clean]
     half = [user_half(ex.user_id) for ex in examples]
-    pool = Hi.ControlPool(table, load_item2id(P.PRIMARY_CATEGORY))
-    csv = P.csv_path(vocab.variant, "next-item", args.split)
+    pool = Hi.ControlPool(table, item2id)
     sha = checkpoint_sha(ckpt)
     inputs = {"checkpoint": f"ar/{ckpt}", "checkpoint_sha256": sha, "variant": vocab.variant.name,
-              "n_digits": n, "split": args.split, "template": "eval", "csv": str(csv.relative_to(paths.WORK)),
+              "n_digits": n, "split": args.split, "template": template,
+              "csv": str(csv.relative_to(paths.WORK)) if csv.is_relative_to(paths.WORK) else str(csv),
               "csv_sha256": hashing.sha256_file(csv), "sem_ids_sha256": hashing.sha256_file(table.source),
               "n_rows": len(examples), "n_users": len({e.user_id for e in examples}),
               "limited": args.limit, "t_pad": t_pad, "batch_rows": args.rows, "seed": SEED,
@@ -172,7 +187,8 @@ def main(argv=None) -> int:
               "n_match_by_digit": {d: int(sum(x["match"][d] for x in info)) for d in range(n)},
               "n_ctrl_key_by_digit": {d: int(sum(x["ctrl"][d] is not None for x in info)) for d in range(n)},
               "users_screening": len({e.user_id for e, h in zip(examples, half) if h == 0}),
-              "users_heldout": len({e.user_id for e, h in zip(examples, half) if h == 1})}
+              "users_heldout": len({e.user_id for e, h in zip(examples, half) if h == 1}),
+              **({"buckets": buckets, **grid_info} if grid_info else {})}
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1))
     (args.out / "arguments.json").write_text(json.dumps({k: str(v) for k, v in vars(args).items()}, indent=1))
     log(f"inputs ok: {ckpt} {args.split} rows={len(examples)} T_pad={t_pad} match={inputs['n_match_by_digit']}")
@@ -183,7 +199,8 @@ def main(argv=None) -> int:
                    "device": torch.cuda.get_device_name() if args.device.startswith("cuda") else "cpu",
                    "torch": torch.__version__, "transformers": __import__("transformers").__version__})
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1))
-    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1)
+    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1,
+                              buckets=buckets)
     all_layers = tuple(range(n_layers))
 
     def meta(i, cond, d=-1, **kw):
@@ -196,12 +213,11 @@ def main(argv=None) -> int:
     clean_recs, attn = [], {k: np.full((len(examples), n, n_layers, n_heads), np.nan, np.float32)
                             for k in ("p_next", "p_ctrl", "p_item")}
     clean_logits = {}
-    for b in range(0, len(examples), runner.B):
-        idx = list(range(b, min(len(examples), b + runner.B)))
+    for bi, idx in enumerate(runner.batches(range(len(examples)), lambda i: len(clean[i]))):
         jobs = [Job(clean[i], meta=meta(i, "clean")) for i in idx]
         pairs = [(r, info[i]["readout"][d]) for r, i in enumerate(idx) for d in range(n)]
         s, cl, _, obs = runner.forward(jobs, observe={"layers": list(all_layers), "pairs": pairs})
-        clean_recs += records(runner, jobs, s, b // runner.B)
+        clean_recs += records(runner, jobs, s, bi)
         for r, i in enumerate(idx):
             clean_logits[i] = [c[r] for c in cl]
         for L in all_layers:
@@ -231,7 +247,7 @@ def main(argv=None) -> int:
                 if c is None:
                     missing.append({"example_id": ex.example_id, "d": d})
                     continue
-                e2 = P.encode(Hi.replace_history_item(ex, k, c), tok, vocab, template="eval", with_target=True)
+                e2 = P.encode(Hi.replace_history_item(ex, k, c), tok, vocab, template=template, with_target=True)
                 Hi.check_replacement(clean[i], e2, k, d)
                 st.add(Job(e2, meta=meta(i, "replace_m_eq_d", d, control_item=c.item_id)))
         st.flush()

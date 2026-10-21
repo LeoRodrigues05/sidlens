@@ -3,6 +3,26 @@
 from __future__ import annotations
 
 import json
+import re
+
+# The explorer names no catalogue: item count, category and variant list all come
+# from the payload. Two pieces of provenance cannot come from the payload alone
+# because they sit inside static template text, so ``render_explorer`` fills them
+# at build time. Their defaults reproduce the original text byte for byte, so a
+# payload that carries neither key renders exactly as it did before the keys
+# existed (the frozen-table explorers depend on that).
+_STAT_LABEL_DEFAULT = "category"
+_SOURCE_TAG_DEFAULT = ""
+# The source tag lands inside a single-quoted JS string in a <script>, not in the
+# JSON payload, so it must not be able to close the string or the script. Callers
+# pass short fixed provenance text; anything outside this alphabet is a bug.
+_SAFE_TEMPLATE_TEXT = re.compile(r"[\w .,:;()/@+\-]*")
+
+
+def _template_text(value: str, what: str) -> str:
+    if not isinstance(value, str) or not _SAFE_TEMPLATE_TEXT.fullmatch(value):
+        raise ValueError(f"{what} must be plain text ([\\w .,:;()/@+-] only), got {value!r}")
+    return value
 
 
 def render_explorer(data: dict) -> str:
@@ -10,6 +30,17 @@ def render_explorer(data: dict) -> str:
 
     ``items`` and each variant's ``codes`` must use the same row order. The
     returned document makes no network requests and can be opened with file://.
+
+    Optional payload keys, both build-time provenance for tables other than the
+    frozen ones:
+
+    * ``summary_field``: the label field behind each variant's ``summary`` rows
+      (the frozen Industrial explorer uses ``cat_l1``; Office's ``cat_l1`` has three
+      classes, so its summary is ``cat_l2``). Named in the statistics note so a
+      reader does not take the agreement for the coarsest level.
+    * ``source_label``: one sentence saying which SID tables the assignments come
+      from, shown under the title. Without it a v3 explorer and a frozen one look
+      identical, and their codes are not comparable.
     """
     payload = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     # Escape HTML parsing delimiters, including user-provided </script>, even
@@ -22,7 +53,17 @@ def render_explorer(data: dict) -> str:
         ("\u2029", "\\u2029"),
     ):
         payload = payload.replace(character, replacement)
-    return _HTML.replace("__SIDLENS_PAYLOAD__", payload, 1)
+    field = data.get("summary_field")
+    stat_label = (_STAT_LABEL_DEFAULT if field is None
+                  else _template_text(f"{_STAT_LABEL_DEFAULT} ({field})", "summary_field"))
+    tag = data.get("source_label")
+    source_tag = (_SOURCE_TAG_DEFAULT if tag is None
+                  else _template_text(tag.rstrip() + " ", "source_label"))
+    # Fill the template's own placeholders BEFORE the payload goes in, so a
+    # catalogue string that happens to contain a placeholder is never rewritten.
+    html = (_HTML.replace("__SIDLENS_STAT_LABEL__", stat_label, 1)
+                 .replace("__SIDLENS_SOURCE_TAG__", source_tag, 1))
+    return html.replace("__SIDLENS_PAYLOAD__", payload, 1)
 
 
 _HTML = r"""<!doctype html>
@@ -57,7 +98,7 @@ main{max-width:1468px;margin:auto;padding:24px}section,.card{background:var(--pa
 </section>
 <section><div class="row between"><h2 id="branch-heading">Next digit groups</h2><span id="branch-note" class="small muted"></span></div><div id="branches" class="branches"></div><button id="more-branches" class="stack hidden">Show all groups</button></section>
 <section><div class="row between"><h2>Items and complete IDs</h2><span class="row"><span id="download-status" class="small muted" role="status"></span><button id="download" class="primary">Download matching items · CSV</button></span></div><p id="table-note" class="small muted">Select an ID to inspect every item with that complete SID.</p><div class="scroll"><table><thead><tr><th>Complete SID</th><th>Item</th><th>ASIN / item ID</th><th>Brand</th><th>Category path</th></tr></thead><tbody id="items"></tbody></table></div><div class="row between pagination"><span id="page-status" class="small muted"></span><div class="row"><label for="page-size" style="margin:0">Rows</label><select id="page-size"><option>25</option><option selected>100</option><option>250</option></select><button id="previous">Previous</button><button id="next">Next</button></div></div></section>
-<section><details><summary>Whole-codebook prefix statistics</summary><p>These statistics are computed over the whole catalog and do not change with the filters above. Pair agreement measures whether two distinct items sharing a prefix have the same category label. The null baseline comes from shuffled labels with the prefix groups held fixed. Singleton groups contain no item pairs. A higher excess is an association with the supplied category labels, not proof of model behavior.</p><div class="scroll"><table><thead><tr><th>Prefix depth</th><th>Groups</th><th>Items in singleton groups</th><th>Labelled pairs</th><th>Category agreement</th><th>Null agreement</th><th>Excess</th></tr></thead><tbody id="statistics"></tbody></table></div></details></section>
+<section><details><summary>Whole-codebook prefix statistics</summary><p>These statistics are computed over the whole catalog and do not change with the filters above. Pair agreement measures whether two distinct items sharing a prefix have the same __SIDLENS_STAT_LABEL__ label. The null baseline comes from shuffled labels with the prefix groups held fixed. Singleton groups contain no item pairs. A higher excess is an association with the supplied category labels, not proof of model behavior.</p><div class="scroll"><table><thead><tr><th>Prefix depth</th><th>Groups</th><th>Items in singleton groups</th><th>Labelled pairs</th><th>Category agreement</th><th>Null agreement</th><th>Excess</th></tr></thead><tbody id="statistics"></tbody></table></div></details></section>
 </main><footer id="footer">Self-contained catalog explorer. All filtering and CSV export happen in your browser.</footer>
 <script id="catalog-data" type="application/json">__SIDLENS_PAYLOAD__</script>
 <script>
@@ -326,7 +367,7 @@ main{max-width:1468px;margin:auto;padding:24px}section,.card{background:var(--pa
     }
   }
   names.forEach((name) => $('variant').append(option(name,name)));
-  $('subtitle').textContent = (data.category ? text(data.category) + ' · ' : '') + fmt.format(items.length) + ' catalog items · ' + names.length + ' codebook variants. Follow a prefix to inspect its items.';
+  $('subtitle').textContent = (data.category ? text(data.category) + ' · ' : '') + fmt.format(items.length) + ' catalog items · ' + names.length + ' codebook variants. __SIDLENS_SOURCE_TAG__Follow a prefix to inspect its items.';
   if (data.generated_at) $('footer').append(document.createTextNode(' Generated ' + text(data.generated_at) + '.'));
   $('variant').addEventListener('change',() => { state.variant=$('variant').value; resetSelection(); render(); });
   $('next-digit').addEventListener('change',() => { if ($('next-digit').value !== '') selectPrefix([...state.prefix,Number($('next-digit').value)]); });

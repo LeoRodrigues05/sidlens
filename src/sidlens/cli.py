@@ -193,6 +193,11 @@ def main(argv=None) -> int:
     x.add_argument("--dry-run", action="store_true")
     b.set_defaults(func=_cmd_bundle)
 
+    g = sub.add_parser("grid", help="the OneDiffRec grid: register | plan | run | status | pilot | summarize | export",
+                       add_help=False)
+    g.add_argument("rest", nargs=argparse.REMAINDER)
+    g.set_defaults(func=lambda a: __import__("sidlens.grid.pipeline", fromlist=["main"]).main(a.rest))
+
     args = p.parse_args(argv)
     return args.func(args)
 

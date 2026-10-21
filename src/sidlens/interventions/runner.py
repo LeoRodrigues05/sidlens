@@ -15,6 +15,19 @@ explicit (B, H, T, T) boolean mask kind to every layer, whether or not it
 knocks anything out. That is what makes the no-op, self-patch and full-restore
 controls bit-exact, and differences between conditions attributable to the
 intervention alone.
+
+Length buckets (grid runs)
+--------------------------
+Grid histories hold up to 50 items, and padding every row to the longest
+prompt of a split would make each forward about three times longer than its
+rows need. With `buckets`, a row is padded to the smallest bucket that holds
+it, never to the batch's or split's longest row, so each row is still always
+computed at one fixed shape (B, T_bucket) and its outputs still depend on that
+row alone. A forward whose jobs span buckets is run as one fixed-shape forward
+per bucket and merged. Forwards that capture activations, patch from caches or
+observe attention must stay in one bucket (`batches` yields such chunks); they
+raise otherwise. Without `buckets` nothing changes: every row is padded to
+`t_pad`, as before.
 """
 
 from __future__ import annotations
@@ -48,25 +61,66 @@ class Job:
     meta: dict = field(default_factory=dict)
 
 
+def length_buckets(lengths, step: int = 32) -> list[int]:
+    """Bucket lengths (multiples of `step`), each strictly longer than the rows it holds.
+
+    Every row keeps at least one pad token. A forward whose rows all filled their
+    bucket would carry an attention mask of ones, and transformers then switches
+    to its unmasked causal kernel: rows sharing a bucket but not a forward would
+    differ in the last bits, and the bit-exact controls would fail (seen on the
+    grid pilot: only rows of length 128 and 160 differed).
+    """
+    if step % 8:
+        raise ValueError("bucket step must be a multiple of 8")
+    return sorted({(int(n) // step + 1) * step for n in lengths})
+
+
 class FixedShapeRunner:
     def __init__(self, model, scorer: DigitScorer, pad_id: int, t_pad: int, rows: int,
-                 n_slots: int):
+                 n_slots: int, buckets=None):
         self.model, self.scorer, self.pad_id = model, scorer, pad_id
         self.t_pad, self.B = t_pad, rows
+        self.buckets = None if buckets is None else sorted({int(b) for b in buckets})
+        if self.buckets is not None and (not self.buckets or self.buckets[-1] > t_pad):
+            raise ValueError(f"buckets {self.buckets} must be non-empty and within T_pad={t_pad}")
         self.dev = next(model.parameters()).device
         self.n = scorer.n_digits
         self.cols = [(s, d) for s in range(n_slots) for d in range(self.n)]
         self.n_heads = model.config.num_attention_heads
         self.n_forwards = 0
 
-    def _tensors(self, encs):
+    def bucket_len(self, n: int) -> int:
+        """The padded length of a row of `n` tokens."""
+        if self.buckets is None:
+            return self.t_pad
+        for b in self.buckets:
+            if n < b:                       # at least one pad token (see length_buckets)
+                return b
+        raise ValueError(f"sequence of {n} tokens does not fit below any bucket {self.buckets}")
+
+    def batches(self, indices, length_of) -> list[list[int]]:
+        """Chunks of at most B indices, each within one length bucket.
+
+        Without buckets these are the consecutive chunks `range(0, n, B)` gives,
+        so an experiment's frozen path is unchanged.
+        """
+        indices = list(indices)
+        if self.buckets is None:
+            return [indices[s:s + self.B] for s in range(0, len(indices), self.B)]
+        groups: dict[int, list[int]] = {}
+        for i in indices:
+            groups.setdefault(self.bucket_len(length_of(i)), []).append(i)
+        return [g[s:s + self.B] for _, g in sorted(groups.items()) for s in range(0, len(g), self.B)]
+
+    def _tensors(self, encs, t_pad: int | None = None):
         import torch
+        t_pad = self.t_pad if t_pad is None else t_pad
         c = P.collate(encs, pad_id=self.pad_id, side="right")
         if int(c["offset"].abs().max()) != 0:
             raise AssertionError("right padding must leave every offset at 0")
-        extra = self.t_pad - c["input_ids"].shape[1]
+        extra = t_pad - c["input_ids"].shape[1]
         if extra < 0:
-            raise ValueError(f"sequence longer than T_pad={self.t_pad}")
+            raise ValueError(f"sequence longer than T_pad={t_pad}")
         pad = torch.nn.functional.pad
         return (pad(c["input_ids"], (0, extra), value=self.pad_id).to(self.dev),
                 pad(c["attention_mask"], (0, extra), value=0).to(self.dev),
@@ -105,8 +159,17 @@ class FixedShapeRunner:
             raise ValueError(f"batch of {real} jobs, capacity {self.B}")
         if capture and any(j.patches or j.knockouts for j in jobs):
             raise ValueError("capture during an intervened forward would record intervened values")
+        t_pad = self.t_pad
+        if self.buckets is not None:
+            lens = {self.bucket_len(len(j.enc)) for j in jobs}
+            if len(lens) > 1:
+                if capture or caches or observe:
+                    raise ValueError("a forward that captures, patches or observes must stay in one length "
+                                     "bucket; chunk its rows with runner.batches()")
+                return self._split(jobs)
+            t_pad = lens.pop()
         encs = [j.enc for j in jobs] + [jobs[0].enc] * (self.B - real)
-        ids, am, pos = self._tensors(encs)
+        ids, am, pos = self._tensors(encs, t_pad)
         mask = base_mask(am, self.n_heads)
         pred = torch.tensor([[e.predict_pos(s, d) for s, d in self.cols] for e in encs],
                             device=self.dev)
@@ -140,6 +203,26 @@ class FixedShapeRunner:
             ids_d = torch.as_tensor(self.scorer.vocab.ids(d), device=logits.device)
             code_logits.append(logits[:, j].index_select(-1, ids_d).float().cpu())
         return scores, code_logits, cap, obs
+
+    def _split(self, jobs: list[Job]):
+        """One fixed-shape forward per length bucket, merged back into job order."""
+        import torch
+        groups: dict[int, list[int]] = {}
+        for i, j in enumerate(jobs):
+            groups.setdefault(self.bucket_len(len(j.enc)), []).append(i)
+        J = len(self.cols)
+        scores = {k: np.empty((len(jobs), J), dtype=np.float64 if k.startswith("logp") else np.int64)
+                  for k in MEASURES}
+        parts: list[tuple[list[int], list]] = []
+        for _, idx in sorted(groups.items()):
+            s, cl, _, _ = self.forward([jobs[i] for i in idx])
+            for k in MEASURES:
+                scores[k][idx] = s[k]
+            parts.append((idx, cl))
+        order = [i for idx, _ in parts for i in idx]
+        inverse = np.argsort(order)
+        code_logits = [torch.cat([cl[c] for _, cl in parts])[torch.as_tensor(inverse)] for c in range(J)]
+        return scores, code_logits, None, None
 
 
 def records(runner: FixedShapeRunner, jobs: list[Job], scores: dict, batch: int) -> list[dict]:

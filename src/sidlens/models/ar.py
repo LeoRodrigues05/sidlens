@@ -62,6 +62,14 @@ AR_CHECKPOINTS: dict[str, str] = {
     "two-item_best": "MQ_4codebook_256",
 }
 
+# Retrained next-item models (experiments/substrate/exp1_ar_next_item_retrain)
+# are named "retrain/<run>/<variant>". Only models that check.py ACCEPTED are
+# in this registry (written by that experiment's register.py), with the hash of
+# every file the analyses read. A retrained model that failed acceptance has
+# no entry, so asking for it raises instead of quietly entering a result.
+RETRAIN_PREFIX = "retrain/"
+RETRAIN_REGISTRY = paths.MANIFESTS / "registry.ar_retrain.json"
+
 # Cells where an AR and a diffusion checkpoint share a SID table. RQ1's paradigm
 # comparison is only defined on these.
 MATCHED_CELLS: dict[str, tuple[str, str]] = {
@@ -128,14 +136,102 @@ class SidVocab:
         return [self.id_of(d, c) for d, c in enumerate(code)]
 
 
+def is_retrained(ckpt: str) -> bool:
+    return ckpt.startswith(RETRAIN_PREFIX)
+
+
+def retrain_registry() -> dict:
+    """The accepted retrained models; {} when nothing is registered yet."""
+    if not RETRAIN_REGISTRY.exists():
+        return {}
+    return json.loads(RETRAIN_REGISTRY.read_text())["models"]
+
+
+def retrain_entry(ckpt: str) -> dict:
+    reg = retrain_registry()
+    if ckpt not in reg:
+        raise KeyError(f"{ckpt!r} is not in {RETRAIN_REGISTRY.name}. Only retrained models that "
+                       f"check.py accepted are registered; have {sorted(reg)}")
+    return reg[ckpt]
+
+
+def is_grid(ckpt: str) -> bool:
+    """A model of the OneDiffRec grid (`grid:<key>@<state>`, see `sidlens.grid`)."""
+    from sidlens import grid
+    return grid.is_grid(ckpt)
+
+
+def _grid_state(ckpt: str) -> tuple[dict, dict]:
+    from sidlens.grid import registry
+    entry, state = registry.load().state(ckpt)
+    if entry["paradigm"] != "ar":
+        raise KeyError(f"{ckpt} is a {entry['paradigm']} model, not AR")
+    return entry, state
+
+
+def known_checkpoints() -> list[str]:
+    """Every name `checkpoint_dir` resolves: the frozen three, the registered
+    retrains, then every weight state of every usable AR grid run (when a grid
+    registry exists on this machine)."""
+    names = sorted(AR_CHECKPOINTS) + sorted(retrain_registry())
+    from sidlens.grid import registry
+    if registry.exists():
+        names += registry.load().names(paradigm="ar", states="all")
+    return names
+
+
+def checkpoint_dir(ckpt: str) -> Path:
+    """Where a checkpoint's weights and tokenizer live (frozen, registered retrain, or grid)."""
+    if is_grid(ckpt):
+        return Path(_grid_state(ckpt)[1]["path"])
+    if is_retrained(ckpt):
+        return paths.WORK / retrain_entry(ckpt)["weights"]
+    if ckpt not in AR_CHECKPOINTS:
+        raise KeyError(f"unknown AR checkpoint {ckpt!r}; have {known_checkpoints()}")
+    return paths.FROZEN_CKPT / "ar" / ckpt
+
+
+def variant_of(ckpt: str) -> str:
+    """The SID variant a checkpoint was trained on. For a grid ZCR twin this is
+    the base variant (e.g. rqkmeans_3codebook_128); its codes come from the
+    run's own table."""
+    if is_grid(ckpt):
+        return _grid_state(ckpt)[0]["variant"]
+    if is_retrained(ckpt):
+        return retrain_entry(ckpt)["variant"]
+    if ckpt not in AR_CHECKPOINTS:
+        raise KeyError(f"unknown AR checkpoint {ckpt!r}; have {known_checkpoints()}")
+    return AR_CHECKPOINTS[ckpt]
+
+
+def checkpoint_sha(ckpt: str) -> str:
+    """Hash the weights and compare with the record; refuse on mismatch.
+
+    Frozen checkpoints are checked against the freeze manifest, retrained ones
+    against the registry, which copied the hash the training run recorded. A
+    file rewritten after acceptance (another training attempt into the same
+    directory) therefore fails here instead of being analysed under the
+    accepted model's name.
+    """
+    from sidlens.provenance import hashing, manifest as manifest_mod
+    if is_grid(ckpt):
+        from sidlens.grid import registry
+        return registry.verify_state(ckpt)
+    if is_retrained(ckpt):
+        want = retrain_entry(ckpt)["sha256"]["model.safetensors"]
+    else:
+        want = manifest_mod.load()["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
+    got = hashing.HashCache().get(checkpoint_dir(ckpt) / "model.safetensors")
+    if got != want:
+        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != recorded {want[:12]}")
+    return got
+
+
 def load_vocab(ckpt: str, variant: SidVariant | str | None = None) -> SidVocab:
     """Read the (digit, code) -> token id map out of a checkpoint's tokenizer."""
-    d = paths.FROZEN_CKPT / "ar" / ckpt
+    d = checkpoint_dir(ckpt)
     if variant is None:
-        variant = AR_CHECKPOINTS.get(ckpt)
-        if variant is None:
-            raise KeyError(f"unknown AR checkpoint {ckpt!r}; "
-                           f"have {sorted(AR_CHECKPOINTS)}")
+        variant = variant_of(ckpt)
     if isinstance(variant, str):
         variant = SidVariant.parse(variant)
 
@@ -225,7 +321,7 @@ def load_model(ckpt: str, device: str = "cpu", dtype: str = "float32"):
     import torch
     from transformers import AutoModelForCausalLM
 
-    d = paths.FROZEN_CKPT / "ar" / ckpt
+    d = checkpoint_dir(ckpt)
     if not (d / "model.safetensors").exists():
         raise FileNotFoundError(f"{d}/model.safetensors is missing")
     model = AutoModelForCausalLM.from_pretrained(

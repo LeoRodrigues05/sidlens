@@ -33,14 +33,12 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
-from sidlens import paths                                                # noqa: E402
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.data.sids import SidTable                                   # noqa: E402
-from sidlens.hooks.store import StoreReader                              # noqa: E402
-from sidlens.interventions.runner import FixedShapeRunner, Job           # noqa: E402
+from sidlens.interventions.runner import FixedShapeRunner, Job, length_buckets  # noqa: E402
 from sidlens.interventions.scoring import DigitScorer                    # noqa: E402
 from sidlens.models import ar                                            # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod         # noqa: E402
 from sidlens.sae.topk import TopKSAE                                     # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
@@ -56,17 +54,15 @@ def half(user: str) -> int:
 
 
 def checkpoint_sha(ckpt: str) -> str:
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Weights hash, checked against the freeze manifest or the grid registry."""
+    return ar.checkpoint_sha(ckpt)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a grid weight state (grid:<key>@<state>) instead of --cell")
+    ap.add_argument("--train-capture", type=Path, help="with --ckpt: ar_capture --out dir, train split")
     ap.add_argument("--sae-run", type=Path, required=True)
     ap.add_argument("--selection", type=Path, required=True)
     ap.add_argument("--parts", default="F2,CC,CM")
@@ -74,10 +70,12 @@ def main(argv=None) -> int:
     ap.add_argument("--rows", type=int, default=128)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    ckpt = CELLS[args.cell]
-    if (args.sae_run / f"cell-{args.cell:02d}").is_dir():          # a run group: take this cell
+    if (args.cell is None) == (args.ckpt is None) or (args.ckpt and not args.train_capture):
+        ap.error("give --cell, or --ckpt with --train-capture")
+    ckpt = args.ckpt or CELLS[args.cell]
+    if args.cell is not None and (args.sae_run / f"cell-{args.cell:02d}").is_dir():   # a run group
         args.sae_run = args.sae_run / f"cell-{args.cell:02d}"
-    if (args.selection / f"cell-{args.cell:02d}").is_dir():          # a run group: take this cell
+    if args.cell is not None and (args.selection / f"cell-{args.cell:02d}").is_dir():
         args.selection = args.selection / f"cell-{args.cell:02d}"
     parts = set(args.parts.split(","))
     args.out.mkdir(parents=True, exist_ok=True)
@@ -101,20 +99,32 @@ def main(argv=None) -> int:
     vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(str(paths.FROZEN_CKPT / "ar" / ckpt), local_files_only=True)
-    examples = P.load_examples(vocab.variant, "next-item", "test")
-    table = SidTable.load(vocab.variant)
-    validation = {"table": P.check_against_table(examples, table), "archive": P.check_against_archive(examples)}
+    tok = AutoTokenizer.from_pretrained(str(ar.checkpoint_dir(ckpt)), local_files_only=True)
+    buckets = None
+    if ar.is_grid(ckpt):
+        from sidlens.grid import inputs as GI
+        gin = GI.ArSetup(ckpt, "test", tok, vocab, task="next-item")
+        examples, table, validation, template = gin.examples, gin.table, gin.validation, gin.template
+    else:
+        examples = P.load_examples(vocab.variant, "next-item", "test")
+        table = SidTable.load(vocab.variant)
+        validation = {"table": P.check_against_table(examples, table), "archive": P.check_against_archive(examples)}
+        template = "eval"
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation, default=str)[:1000]}")
-    clean = [P.encode(ex, tok, vocab, template="eval", with_target=True) for ex in examples]
+    clean = [P.encode(ex, tok, vocab, template=template, with_target=True) for ex in examples]
     t_pad = -(-max(len(e) for e in clean) // 8) * 8
     if args.limit:
         examples, clean = examples[:args.limit], clean[:args.limit]
+    if ar.is_grid(ckpt):                     # pad each row to its length bucket, not the longest history
+        examples, clean = GI.sort_by_length(examples, clean)
+        buckets = length_buckets([len(e) for e in clean])
+        t_pad = buckets[-1]
     codes = [(P.parse_sid(e.history_sids[-1], n), P.parse_sid(e.target_sids[0], n)) for e in examples]
     halves = [half(e.user_id) for e in examples]
     saes = {L: TopKSAE.load(args.sae_run / "sae" / f"L{L}", device="cuda") for L in LAYERS}
-    tr = StoreReader(paths.DERIVED / "ar_capture" / TRAIN_STORE[ckpt] / "capture" / "store")
+    train_at = args.train_capture or TRAIN_STORE[ckpt]
+    tr = AI.capture_store(train_at, ckpt, "train", verify=False)
     means = {}
     for L in LAYERS:
         X = tr.load(f"model.layers.{L}")
@@ -124,10 +134,11 @@ def main(argv=None) -> int:
     inputs = {"checkpoint": f"ar/{ckpt}", "checkpoint_sha256": sha, "variant": vocab.variant.name,
               "sae_run": str(args.sae_run), "selection": str(args.selection), "parts": sorted(parts),
               "n_rows": len(examples), "limited": args.limit, "t_pad": t_pad, "batch_rows": args.rows,
-              "layers": LAYERS, "train_mean_store": TRAIN_STORE[ckpt]}
+              "layers": LAYERS, "train_mean_store": str(train_at), "buckets": buckets}
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1))
     model = ar.load_model(ckpt, device="cuda", dtype="bfloat16")
-    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1)
+    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1,
+                              buckets=buckets)
     sites = [f"model.layers.{L}" for L in LAYERS]
     d_model = model.config.hidden_size
     c0_codes = list(vocab.codes(0))
@@ -171,8 +182,7 @@ def main(argv=None) -> int:
             flush()
 
     clean_logits: dict[int, list] = {}
-    for b0 in range(0, len(examples), runner.B):
-        idxs = list(range(b0, min(len(examples), b0 + runner.B)))
+    for idxs in runner.batches(range(len(examples)), lambda i: len(clean[i])):
         jobs = [Job(clean[i], meta={"i": i}) for i in idxs]
         s, cl, cap, _ = runner.forward(jobs, capture=sites)
         for r, i in enumerate(idxs):
@@ -223,7 +233,7 @@ def main(argv=None) -> int:
                                              "digits": [d], "n_active": int(keep.sum()),
                                              "match": codes[i][0][:d] == codes[i][1][:d]}), site, [pd_], v)
         flush()
-        log(f"[chunk] rows {idxs[-1] + 1}/{len(examples)}, {runner.n_forwards} forwards, {time.time() - t0:.0f}s")
+        log(f"[chunk] rows {max(idxs) + 1}/{len(examples)}, {runner.n_forwards} forwards, {time.time() - t0:.0f}s")
     flush()
     df = pd.DataFrame(recs)
     df["match"] = [codes[i][0][:d] == codes[i][1][:d] if d >= 1 else codes[i][0][0] == codes[i][1][0]

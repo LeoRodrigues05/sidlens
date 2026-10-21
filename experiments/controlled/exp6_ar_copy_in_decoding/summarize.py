@@ -6,6 +6,10 @@ Recomputes ranks from the stored 50-SID lists: exact-SID rank (primary) and
 latter only to compare the baseline with the recorded archive metrics.
 Strata come from the CSV, fixed before decoding. One paired user bootstrap.
 
+Grid cells (`run_grid.py`) carry their rows in `rows.parquet` (target, history
+SIDs, retrospective exp7's target class); they have no archive, so `calc_rank`
+equals the exact rank there and the class strata are added.
+
     python summarize.py --cells <run>/cell-00 <run>/cell-01 --out <run>/../summary-<id>
 """
 
@@ -68,22 +72,28 @@ def load_cell(d: Path) -> dict:
         raise RuntimeError("pilot cells are not summarized")
     val = json.loads((d / "validation.json").read_text())
     variant = inputs["variant"]
-    ex = {e.row: e for e in P.load_examples(variant, "next-item", "test")}
-    to_title, to_item = calc_maps(paths.WORK / inputs["info_file"])
+    grid = (d / "rows.parquet").exists()
+    if grid:
+        g_rows = pd.read_parquet(d / "rows.parquet").set_index("row")
+        ex = {r: (t, list(h), c == "same_item", c) for r, t, h, c in
+              zip(g_rows.index, g_rows.target_sid, g_rows.history_sids, g_rows.cls)}
+    else:
+        ex = {e.row: (e.target_sids[0], list(e.history_sids), e.target_item_ids[0] in e.history_item_ids, None)
+              for e in P.load_examples(variant, "next-item", "test")}
+        to_title, to_item = calc_maps(paths.WORK / inputs["info_file"])
     frames = []
     for f in sorted(d.glob("predictions_*.parquet")):
         df = pd.read_parquet(f)
         rows = []
         for r in df.itertuples():
-            e = ex[r.row]
-            tgt = e.target_sids[0]
+            tgt, hsids, rep_item, cls = ex[r.row]
             pred = list(r.predict)
             rk = exact_rank(pred, tgt)
-            hist = set(e.history_sids)
-            recent0 = e.history_sids[-1].split(">")[0]
+            hist = set(hsids)
+            recent0 = hsids[-1].split(">")[0]
             rows.append({"row": r.row, "user_id": r.user_id, "condition": r.condition, "rank": rk,
-                         "calc_rank": calc_rank(pred, tgt, to_title, to_item),
-                         "repeat": tgt in hist, "repeat_item": e.target_item_ids[0] in e.history_item_ids,
+                         "calc_rank": rk if grid else calc_rank(pred, tgt, to_title, to_item),
+                         "cls": cls, "repeat": tgt in hist, "repeat_item": rep_item,
                          "top1_is_history": pred[0] in hist,
                          "top1_digit0_is_recent": pred[0].split(">")[0] == recent0,
                          "top10_history_share": np.mean([p in hist for p in pred[:10]]),
@@ -119,7 +129,8 @@ def main(argv=None) -> int:
 
     for c in cells:
         t = c["t"]
-        wide = t.pivot_table(index=["row", "user_id", "stratum", "repeat_item"], columns="condition",
+        idx = ["row", "user_id", "stratum", "repeat_item"] + (["cls"] if t.cls.notna().all() else [])
+        wide = t.pivot_table(index=idx, columns="condition",
                              values=[f"hr{k}" for k in KS] + ["ndcg10", "top1_is_history",
                                                                 "top1_digit0_is_recent", "top10_history_share"])
         wide = wide.reset_index()
@@ -144,6 +155,11 @@ def main(argv=None) -> int:
                 for s in ("repeat", "new"):
                     m = wide.stratum == s
                     add(c, "delta", boot.mean(wide.user_id[m], diff[m]), contrast=f"{a} - {b}", metric=metric, stratum=s)
+                if "cls" in wide:                                       # grid: retrospective exp7's classes
+                    for s in wide.cls.dropna().unique():
+                        m = wide.cls == s
+                        add(c, "delta", boot.mean(wide.user_id[m], diff[m]), contrast=f"{a} - {b}",
+                            metric=metric, stratum=f"class:{s}")
                 m = wide.repeat_item
                 add(c, "delta", boot.mean(wide.user_id[m], diff[m]), contrast=f"{a} - {b}", metric=metric,
                     stratum="repeat_item")
@@ -151,8 +167,8 @@ def main(argv=None) -> int:
                 add(c, "interaction", boot.paired_difference((wide.user_id[rep], diff[rep]),
                                                              (wide.user_id[new], diff[new])),
                     contrast=f"{a} - {b}", metric=metric, stratum="repeat - new")
-        # V1 archive-equivalent HR for the baseline
-        if "B" in conds:
+        # V1 archive-equivalent HR for the baseline (frozen cells only)
+        if "B" in conds and "archive" in c["inputs"]:
             g = t[t.condition == "B"]
             rec = json.loads((paths.FROZEN_RESULTS / "sweep_metrics" / "next-item" / "metrics" /
                               Path(c["inputs"]["archive"]).name.replace(".predictions.json", ".json")).read_text())["metrics"]

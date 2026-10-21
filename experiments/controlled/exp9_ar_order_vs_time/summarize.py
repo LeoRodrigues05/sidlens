@@ -106,11 +106,14 @@ def part_d(cell: Path, w: pd.DataFrame, boot: UserBootstrap, tag: dict) -> list[
         return []
     d = pd.read_parquet(p)
     rows = pd.read_parquet(cell / "rows.parquet").set_index("example_id")
-    from sidlens.data import ar_prompts as P
-    ex = {e.example_id: e for e in P.load_examples(tag["variant"], "next-item", "test")}
     wide_ = d.pivot_table(index="example_id", columns="condition", values="predict", aggfunc="first")
     x = rows.loc[wide_.index].copy()
-    x["target"] = [ex[i].target_sids[0] for i in x.index]
+    if "target" in d:                                   # grid cells record the target with the lists
+        x["target"] = d.drop_duplicates("example_id").set_index("example_id").target.loc[x.index]
+    else:
+        from sidlens.data import ar_prompts as P
+        ex = {e.example_id: e for e in P.load_examples(tag["variant"], "next-item", "test")}
+        x["target"] = [ex[i].target_sids[0] for i in x.index]
     hit = lambda preds, t, k: float(t in list(preds)[:k])                # noqa: E731
     x["hit10_clean"] = [hit(p, t, 10) for p, t in zip(wide_.clean_plain, x.target)]
     x["hit10_swap"] = [hit(p, t, 10) for p, t in zip(wide_.swap_plain, x.target)]
@@ -173,7 +176,8 @@ def main(argv=None) -> int:
         ctl = val["controls_identical_sid_swap"]
         if ctl["n"] and ctl["n_exact"] != ctl["n"]:
             raise RuntimeError(f"{c}: identical-SID swap controls not bit-exact: {ctl}")
-        cells.append({"dir": c, "variant": inp["variant"], "split": inp["split"], "validation": val})
+        cells.append({"dir": c, "variant": inp["variant"], "split": inp["split"], "validation": val,
+                      "grid": {k: inp[k] for k in ("grid_key", "grid_state", "dataset") if k in inp}})
         ws.append(wide(c))
     splits = {c["split"] for c in cells}
     if len(splits) != 1:
@@ -181,7 +185,7 @@ def main(argv=None) -> int:
     boot = UserBootstrap(pd.concat([w.user_id for w in ws]), draws=DRAWS, seed=SEED)
     res = []
     for c, w in zip(cells, ws):
-        tag = {"variant": c["variant"], "split": c["split"]}
+        tag = {"variant": c["variant"], "split": c["split"], **c["grid"]}
         res += [{**r, "part": "TF"} for r in estimands(w, boot, tag)]
         res += part_d(c["dir"], w, boot, tag)
     res = pd.DataFrame(res)
@@ -197,7 +201,7 @@ def main(argv=None) -> int:
     for c in cells:
         v = c["validation"]
         L.append(f"- {c['variant']}: identical-SID swap controls {v['controls_identical_sid_swap']}; "
-                 f"V-D0 {v.get('V_D0_exp6_plain_reproduction', 'n/a')}")
+                 f"V-D0 {v.get('V_D0_exp6_plain_reproduction', v.get('V_D0_grid_reproduction', 'n/a'))}")
     L += ["", "| variant | stratum | estimand | est | 95% CI | rows | users |", "|---|---|---|---|---|---|---|"]
     for _, r in res[res.estimand.isin(key)].iterrows():
         L.append(f"| {r.variant} | {r.stratum} | {r.estimand} | {r.est:.3f} | [{r.lo:.3f}, {r.hi:.3f}] | "

@@ -6,11 +6,30 @@ trustworthy, so it exits non-zero by default rather than warning.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from sidlens import paths
 from sidlens.provenance import hashing, manifest as manifest_mod
 from sidlens.provenance import profiles as profiles_mod
+
+
+def extra_vendor_manifests() -> list[dict]:
+    """Manifests of vendor trees added after the base snapshot (`manifests/vendor.*.json`).
+
+    The base manifest is never rewritten, so a tree vendored later (the
+    OneDiffRec files the grid runs depend on) carries its own manifest: the
+    upstream commit it was copied from, every file's sha256, and the Merkle
+    root `verify` compares against. A manifest whose name does not match its
+    file name raises, so a copied manifest cannot vouch for another tree.
+    """
+    out = []
+    for path in sorted(paths.MANIFESTS.glob("vendor.*.json")):
+        doc = json.loads(path.read_text())
+        if path.name != f"vendor.{doc.get('name')}.json":
+            raise ValueError(f"{path.name} describes vendor tree {doc.get('name')!r}")
+        out.append(doc)
+    return out
 
 
 def verify_snapshot(snapshot_id: str | None = None, quick: bool = False,
@@ -44,6 +63,23 @@ def verify_snapshot(snapshot_id: str | None = None, quick: bool = False,
         if not ok:
             expected_files = man["vendor"]["trees"][name]["files"]
             entry["diff"] = hashing.diff_trees(expected_files, actual)
+            report["ok"] = False
+        report["sections"][f"vendor/{name}"] = entry
+
+    # --- vendor trees with their own manifests -------------------------------
+    for extra in extra_vendor_manifests():
+        name = extra["name"]
+        root = paths.VENDOR / name
+        if not root.exists():
+            report["sections"][f"vendor/{name}"] = {"ok": False, "error": "missing"}
+            report["ok"] = False
+            continue
+        actual = hashing.hash_tree(root, exclude={"__pycache__"}, cache=cache)
+        actual_root = hashing.merkle_root(actual)
+        ok = actual_root == extra["merkle_root"]
+        entry = {"ok": ok, "expected": extra["merkle_root"], "actual": actual_root}
+        if not ok:
+            entry["diff"] = hashing.diff_trees(extra["files"], actual)
             report["ok"] = False
         report["sections"][f"vendor/{name}"] = entry
 

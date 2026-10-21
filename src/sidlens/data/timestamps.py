@@ -32,7 +32,10 @@ Traps, each with its guard
    is the target of exactly one next-item row, and the rows are sorted by
    target time. The row's place in train -> valid -> test therefore bounds its
    day by its neighbours, and `_resolve` keeps the one assignment that fits.
-   Anything still ambiguous raises. Nothing is guessed.
+   Anything still ambiguous raises. Nothing is guessed. (Office has a user whose
+   four copies of one item span two adjacent days in a way no order settles;
+   `on_ambiguous="flag"` takes the earliest fitting days, lists those positions
+   in `EventTimes.ambiguous`, and the row tables mark every row touching them.)
 3. **Same-day order is not time order.** Within a day the stable sort keeps
    raw-file order, and the raw dump is about 97% ASIN-sorted. The "most recent"
    item of a same-day burst is therefore mostly the one with the next-lower
@@ -45,6 +48,14 @@ Traps, each with its guard
    event, read from `all_item_seqs.json`. `diffusion_row_times` proves that file
    equals `inter.json` under the id maps before attaching any time. Rows are
    joined through (user, position), never by row number.
+
+Other catalogs and roots
+------------------------
+`load_event_times(category, root)` runs the same alignment on Office, or on a
+OneDiffRec data root (`<root>/<category>.{review.json,inter.json,*.inter}`,
+the grid's `Amazon18/<category>/`). The grid records each row's event
+positions, so `position_row_times` attaches days by (user, position) directly
+(`sidlens.grid.events`); the window search above is only for the frozen rows.
 """
 
 from __future__ import annotations
@@ -55,6 +66,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 
@@ -93,12 +105,13 @@ class EventTimes:
     sequences: dict[str, tuple[int, ...]]
     times: dict[str, np.ndarray]
     report: dict
+    ambiguous: frozenset = frozenset()       # (user, position) whose day no order settles
 
     def gap_days(self, user: str, later: int, earlier: int) -> int:
         return int(self.times[user][later] - self.times[user][earlier]) // DAY
 
 
-def _align(seq: list[int], keys: list[tuple[int, int]], cap: int = 64) -> list[tuple[int, ...]]:
+def _align(seq: list[int], keys: list[tuple[int, int]], cap: int = 10_000) -> list[tuple[int, ...]]:
     """Every assignment of key times to `seq` consistent with a stable time sort.
 
     keys: the user's distinct (item, time) reviews in review-file order.
@@ -140,8 +153,16 @@ def _align(seq: list[int], keys: list[tuple[int, int]], cap: int = 64) -> list[t
     return sols
 
 
-def _read_inter(split: str) -> list[tuple[str, tuple[int, ...], int]]:
-    path = paths.FROZEN_DATA / "interactions" / f"{CATEGORY}.{split}.inter"
+def _source(category: str, root, kind: str):
+    """A catalog's file: the frozen layout when `root` is None, else `<root>/<category>.<kind>`."""
+    if root is not None:
+        return Path(root) / f"{category}.{kind}"
+    sub = "reviews" if kind == "review.json" else "interactions"
+    return paths.FROZEN_DATA / sub / f"{category}.{kind}"
+
+
+def _read_inter(split: str, category: str = CATEGORY, root=None) -> list[tuple[str, tuple[int, ...], int]]:
+    path = _source(category, root, f"{split}.inter")
     lines = path.read_text().splitlines()
     if lines[0] != "user_id:token\titem_id_list:token_seq\titem_id:token":
         raise ValueError(f"{path.name}: unexpected header {lines[0]!r}")
@@ -152,21 +173,36 @@ def _read_inter(split: str) -> list[tuple[str, tuple[int, ...], int]]:
     return rows
 
 
+def window_hits(seq: tuple[int, ...], history: tuple[int, ...], target: int) -> list[int]:
+    """Every position i with seq[i] == target and seq[max(i-10,0):i] == history."""
+    return [i for i in range(1, len(seq))
+            if seq[i] == target and seq[max(i - MAX_AR_HISTORY, 0):i] == history]
+
+
 def window_position(seq: tuple[int, ...], history: tuple[int, ...], target: int) -> int:
     """The one position i with seq[i] == target and seq[max(i-10,0):i] == history."""
-    hits = [i for i in range(1, len(seq))
-            if seq[i] == target and seq[max(i - MAX_AR_HISTORY, 0):i] == history]
+    hits = window_hits(seq, history, target)
     if len(hits) != 1:
         raise ValueError(f"window matches {len(hits)} positions, expected exactly 1")
     return hits[0]
 
 
-def _resolve(sols: dict[str, list[tuple[int, ...]]], seqs: dict[str, tuple[int, ...]]):
+def _resolve(sols: dict[str, list[tuple[int, ...]]], seqs: dict[str, tuple[int, ...]],
+             category: str = CATEGORY, root=None, on_ambiguous: str = "raise"):
     """Pick each ambiguous user's assignment from the global target-time order."""
-    order = []                                           # (user, pos) in train->valid->test order
+    # A user who repeats the same 10-item window and target (Office: one user, 8
+    # copies) has identical rows. Times never decrease along a sequence and the
+    # rows were stable-sorted by time, so the k-th copy in the global order is the
+    # k-th matching position; the sortedness check below would catch a violation.
+    order, seen = [], collections.Counter()           # (user, pos) in train->valid->test order
     for split in SPLIT_ORDER:
-        for u, h, t in _read_inter(split):
-            order.append((u, window_position(seqs[u], h, t)))
+        for u, h, t in _read_inter(split, category, root):
+            hits = window_hits(seqs[u], h, t)
+            k = seen[(u, h, t)]
+            seen[(u, h, t)] += 1
+            if k >= len(hits):
+                raise ValueError(f"user {u}: window occurs {k + 1} times but matches {len(hits)} positions")
+            order.append((u, hits[k]))
     if len(set(order)) != len(order) or len(order) != sum(len(s) - 1 for s in seqs.values()):
         raise ValueError("next-item rows are not one per position >= 1")
     fixed = np.array([sols[u][0][p] if len({s[p] for s in sols[u]}) == 1 else -1
@@ -174,29 +210,35 @@ def _resolve(sols: dict[str, list[tuple[int, ...]]], seqs: dict[str, tuple[int, 
     lo = np.maximum.accumulate(np.where(fixed >= 0, fixed, -1))
     hi = np.minimum.accumulate(np.where(fixed >= 0, fixed, np.iinfo(np.int64).max)[::-1])[::-1]
     where = {k: j for j, k in enumerate(order)}
-    chosen, n_pos = {}, 0
+    chosen, n_pos, unsettled = {}, 0, set()
     for u, cand in sols.items():
         if len(cand) == 1:
             chosen[u] = cand[0]
             continue
-        ok = [s for s in cand if all(
-            lo[where[(u, p)]] <= s[p] <= hi[where[(u, p)]] for p in range(1, len(s)))]
-        if len({tuple(s) for s in ok}) != 1:
+        ok = sorted({tuple(s) for s in cand if all(
+            lo[where[(u, p)]] <= s[p] <= hi[where[(u, p)]] for p in range(1, len(s)))})
+        if len(ok) != 1 and not (ok and on_ambiguous == "flag"):
             raise ValueError(f"user {u}: {len(ok)} assignments fit the global order; expected 1")
+        unsettled |= {(u, p) for p in range(len(ok[0])) if len({s[p] for s in ok}) > 1}
         chosen[u] = ok[0]
         n_pos += sum(len({s[p] for s in cand}) > 1 for p in range(len(cand[0])))
     t_order = np.array([chosen[u][p] for u, p in order])
     if np.any(np.diff(t_order) < 0):
         raise ValueError("resolved times are not sorted along train -> valid -> test")
-    return chosen, n_pos, order
+    return chosen, n_pos, order, unsettled
 
 
-@lru_cache(maxsize=1)
-def load_event_times() -> EventTimes:
-    """Align, resolve and verify the day of every event. Raises on any inconsistency."""
-    d = paths.FROZEN_DATA
-    rev_path = d / "reviews" / f"{CATEGORY}.review.json"
-    inter_path = d / "interactions" / f"{CATEGORY}.inter.json"
+@lru_cache(maxsize=4)
+def load_event_times(category: str = CATEGORY, root=None, on_ambiguous: str = "raise") -> EventTimes:
+    """Align, resolve and verify the day of every event. Raises on any inconsistency.
+
+    category, root  the frozen Industrial files by default; see the module doc.
+    on_ambiguous    "raise" (default) or "flag" (trap 2).
+    """
+    if on_ambiguous not in ("raise", "flag"):
+        raise ValueError("on_ambiguous is 'raise' or 'flag'")
+    rev_path = _source(category, root, "review.json")
+    inter_path = _source(category, root, "inter.json")
     rev = json.loads(rev_path.read_text())
     inter = json.loads(inter_path.read_text())
     keys: dict[str, list[tuple[int, int]]] = collections.defaultdict(list)
@@ -213,10 +255,11 @@ def load_event_times() -> EventTimes:
         sols[u] = _align(list(s), keys[u])
         if not sols[u]:
             raise ValueError(f"user {u}: no stable-sort alignment of review times")
-    chosen, n_amb_pos, order = _resolve(sols, seqs)
+    chosen, n_amb_pos, order, unsettled = _resolve(sols, seqs, category, root, on_ambiguous)
     times = {u: np.asarray(chosen[u], dtype=np.int64) for u in seqs}
     n_events = sum(len(s) for s in seqs.values())
     report = {
+        "category": category, "root": str(root) if root is not None else "frozen",
         "review_json_sha256": hashlib.sha256(rev_path.read_bytes()).hexdigest(),
         "inter_json_sha256": hashlib.sha256(inter_path.read_bytes()).hexdigest(),
         "n_users": len(seqs), "n_events": n_events, "n_review_keys": len(rev),
@@ -224,10 +267,11 @@ def load_event_times() -> EventTimes:
         "n_users_ambiguous_before_resolution": sum(len(s) > 1 for s in sols.values()),
         "n_positions_ambiguous_before_resolution": int(n_amb_pos),
         "n_next_item_rows": len(order),
+        "unsettled_positions": sorted([u, int(p)] for u, p in unsettled),
         "first_day": int(min(t.min() for t in times.values())),
         "last_day": int(max(t.max() for t in times.values())),
     }
-    return EventTimes(seqs, times, report)
+    return EventTimes(seqs, times, report, frozenset(unsettled))
 
 
 # ------------------------------------------------------------ row tables --
@@ -323,4 +367,50 @@ def diffusion_row_times(cohort, ev: EventTimes | None = None):
             hist.append({"user": raw, "k": k, "recency": L - k, "item_id": mapped[st + k],
                          "t": int(t[st + k]), "gap_days": int(gaps[k]),
                          "same_day_as_target": bool(gaps[k] == 0), "dup_of_target": bool(dup[k])})
+    return pd.DataFrame(rows), pd.DataFrame(hist)
+
+
+def position_row_times(specs, ev: EventTimes):
+    """The `ar_row_times` tables for rows that carry their own event positions.
+
+    specs: dicts with example_id, row, user_id (raw), user (inter.json key),
+    history_positions, target_positions, history_item_ids, target_item_ids
+    (item indices). A grid row names (user, position) for every event, so no
+    window search is needed; instead every item is checked against
+    `inter.json` at its position, which catches a row from another catalog or
+    another item map. Rows with two targets get `t_target2` (else -1).
+    `time_ambiguous` marks rows (and history items) touching `ev.ambiguous`.
+    """
+    import pandas as pd
+
+    rows, hist = [], []
+    for sp in specs:
+        u = sp["user"]
+        seq, t = ev.sequences[u], ev.times[u]
+        hp, tp = list(sp["history_positions"]), list(sp["target_positions"])
+        if [seq[p] for p in hp] != list(sp["history_item_ids"]) or \
+                [seq[p] for p in tp] != list(sp["target_item_ids"]):
+            raise ValueError(f"{sp['example_id']}: items differ from inter.json at their positions")
+        if hp != list(range(tp[0] - len(hp), tp[0])) or tp != list(range(tp[0], tp[0] + len(tp))):
+            raise ValueError(f"{sp['example_id']}: positions are not one contiguous window")
+        i, L = tp[0], len(hp)
+        tt = int(t[i])
+        gaps = (tt - t[hp]) // DAY if L else np.zeros(0, np.int64)
+        dup = [(seq[p] == seq[i]) and (t[p] == tt) for p in hp]
+        rows.append({
+            "example_id": sp["example_id"], "row": sp["row"], "user_id": sp["user_id"], "user": u,
+            "pos": i, "hist_len": L, "t_target": tt,
+            "t_target2": int(t[tp[1]]) if len(tp) > 1 else -1,
+            "gap1_days": int(gaps[-1]) if L else -1,
+            "gap12_days": int((t[i - 1] - t[i - 2]) // DAY) if L >= 2 else -1,
+            "tie12": bool(L >= 2 and t[i - 1] == t[i - 2]),
+            "same_day_as_target": bool(L and gaps[-1] == 0), "n_same_day": int((gaps == 0).sum()),
+            "span_days": int(gaps[0]) if L else -1, "dup_target": bool(any(dup)),
+            "repeat_item": seq[i] in [seq[p] for p in hp],
+            "time_ambiguous": any((u, p) in ev.ambiguous for p in hp + tp)})
+        for k, p in enumerate(hp):
+            hist.append({"example_id": sp["example_id"], "k": k, "recency": L - k, "item_id": seq[p],
+                         "t": int(t[p]), "gap_days": int(gaps[k]), "same_day_as_target": bool(gaps[k] == 0),
+                         "dup_of_target": bool(dup[k]),
+                         "time_ambiguous": (u, p) in ev.ambiguous or (u, i) in ev.ambiguous})
     return pd.DataFrame(rows), pd.DataFrame(hist)

@@ -8,6 +8,7 @@ fixed-shape runner (`sidlens.interventions.runner`), whose no-op, self-patch
 and full-restore controls must be bit-exact.
 
     python experiments/controlled/exp5_ar_next_two_conditioning/run.py --out <new dir>
+    python .../run.py --ckpt 'grid:<key>@best' --out <new dir>     # a next-two grid run
 """
 
 from __future__ import annotations
@@ -28,10 +29,10 @@ from sidlens import paths                                                # noqa:
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.data.sids import SidTable, load_item2id                     # noqa: E402
 from sidlens.interventions import history as Hi                          # noqa: E402
-from sidlens.interventions.runner import FixedShapeRunner, Job, max_diff, records  # noqa: E402
+from sidlens.interventions.runner import FixedShapeRunner, Job, length_buckets, max_diff, records  # noqa: E402
 from sidlens.interventions.scoring import DigitScorer                    # noqa: E402
 from sidlens.models import ar                                            # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod         # noqa: E402
+from sidlens.provenance import hashing                                   # noqa: E402
 
 CKPT = "two-item_best"
 SEED = 20260927
@@ -43,12 +44,8 @@ CONTROLS = {"noop_pre": ("pre", "clean", "corrupted"),       # kind: (group, sou
 
 
 def checkpoint_sha(ckpt: str) -> str:
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Weights hash, checked against the freeze manifest or the grid registry."""
+    return ar.checkpoint_sha(ckpt)
 
 
 def groups(e: P.Encoded, n: int) -> dict[str, list[int]]:
@@ -66,6 +63,8 @@ def groups(e: P.Encoded, n: int) -> dict[str, list[int]]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--ckpt", default=CKPT, choices=ar.known_checkpoints(),
+                    help="two-item_best (frozen) or a next-two grid weight state (grid:<key>@<state>)")
     ap.add_argument("--parts", default="A,B")
     ap.add_argument("--limit", type=int, default=None, help="first N rows (pilot only)")
     ap.add_argument("--rows", type=int, default=128)
@@ -93,41 +92,68 @@ def main(argv=None) -> int:
     torch.backends.cudnn.allow_tf32 = False
     torch.use_deterministic_algorithms(True, warn_only=True)
 
-    vocab = ar.load_vocab(CKPT)
+    ckpt = args.ckpt
+    vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(str(paths.FROZEN_CKPT / "ar" / CKPT), local_files_only=True)
-    examples = P.load_examples(vocab.variant, "two-item", "test")
-    table = SidTable.load(vocab.variant)
-    validation = {"table": P.check_against_table(examples, table),
-                  "archive": P.check_against_archive(examples),
-                  "vocab_vs_table": ar.validate_against(vocab, table)}
+    tok = AutoTokenizer.from_pretrained(str(ar.checkpoint_dir(ckpt)), local_files_only=True)
+    grid_info, buckets, arch = {}, None, None
+    if ar.is_grid(ckpt):
+        # A next-two grid run: its own prepared rows, SID table and item ids, and
+        # OneDiffRec's current prompt (checked token for token, targets included).
+        from sidlens.grid import inputs as GI
+        gin = GI.ArSetup(ckpt, "test", tok, vocab, task="two-item")
+        examples, table, item2id, template = gin.examples, gin.table, gin.item2id, gin.template
+        validation, grid_info, csv = gin.validation, gin.info, gin.csv
+    else:
+        if ckpt != CKPT:
+            raise ValueError(f"{ckpt} is not a next-two model; the frozen one is {CKPT}")
+        examples = P.load_examples(vocab.variant, "two-item", "test")
+        table = SidTable.load(vocab.variant)
+        validation = {"table": P.check_against_table(examples, table),
+                      "archive": P.check_against_archive(examples),
+                      "vocab_vs_table": ar.validate_against(vocab, table)}
+        item2id, template = load_item2id(P.PRIMARY_CATEGORY), "eval"
+        csv = P.csv_path(vocab.variant, "two-item", "test")
+        arch = P.archive_path(vocab.variant, "two-item")
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation, default=str)[:2000]}")
-    clean = [P.encode(ex, tok, vocab, template="eval", with_target=True) for ex in examples]
+    clean = [P.encode(ex, tok, vocab, template=template, with_target=True) for ex in examples]
     t_pad = -(-max(len(e) for e in clean) // 8) * 8
     if args.limit:
         examples, clean = examples[:args.limit], clean[:args.limit]
-    pool = Hi.ControlPool(table, load_item2id(P.PRIMARY_CATEGORY))
-    csv = P.csv_path(vocab.variant, "two-item", "test")
-    arch = P.archive_path(vocab.variant, "two-item")
-    sha = checkpoint_sha(CKPT)
-    inputs = {"checkpoint": f"ar/{CKPT}", "checkpoint_sha256": sha, "variant": vocab.variant.name,
-              "n_digits": n, "split": "test", "task": "two-item", "template": "eval",
-              "csv": str(csv.relative_to(paths.WORK)), "csv_sha256": hashing.sha256_file(csv),
-              "archive_sha256": hashing.sha256_file(arch), "sem_ids_sha256": hashing.sha256_file(table.source),
+    if grid_info:
+        # Histories of up to 50 items: pad each row to its length bucket, not the split's longest.
+        examples, clean = GI.sort_by_length(examples, clean)
+        buckets = length_buckets([len(e) for e in clean])
+        t_pad = buckets[-1]
+    pool = Hi.ControlPool(table, item2id)
+    sha = checkpoint_sha(ckpt)
+    inputs = {"checkpoint": f"ar/{ckpt}", "checkpoint_sha256": sha, "variant": vocab.variant.name,
+              "n_digits": n, "split": "test", "task": "two-item", "template": template,
+              "csv": str(csv.relative_to(paths.WORK)) if csv.is_relative_to(paths.WORK) else str(csv),
+              "csv_sha256": hashing.sha256_file(csv),
+              "archive_sha256": hashing.sha256_file(arch) if arch else None,
+              "sem_ids_sha256": hashing.sha256_file(table.source),
               "n_rows": len(examples), "n_users": len({e.user_id for e in examples}), "limited": args.limit,
-              "t_pad": t_pad, "batch_rows": args.rows, "seed": SEED, "parts": sorted(parts)}
+              "t_pad": t_pad, "batch_rows": args.rows, "seed": SEED, "parts": sorted(parts),
+              **({"buckets": buckets, **grid_info} if grid_info else {})}
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1))
     (args.out / "arguments.json").write_text(json.dumps({k: str(v) for k, v in vars(args).items()}, indent=1))
-    log(f"inputs ok: {CKPT} rows={len(examples)} T_pad={t_pad} sha={sha[:12]}")
+    # the rows' targets, so the summary needs no access to the run's inputs
+    pd.DataFrame({"example_id": [e.example_id for e in examples], "user_id": [e.user_id for e in examples],
+                  "target_sid0": [e.target_sids[0] for e in examples],
+                  "target_sid1": [e.target_sids[1] for e in examples]}).to_parquet(args.out / "rows.parquet",
+                                                                                  index=False)
+    log(f"inputs ok: {ckpt} rows={len(examples)} T_pad={t_pad} sha={sha[:12]}")
 
-    model = ar.load_model(CKPT, device=args.device, dtype=args.dtype)
+    model = ar.load_model(ckpt, device=args.device, dtype=args.dtype)
     inputs.update({"dtype": args.dtype, "attn_implementation": model.config._attn_implementation,
                    "device": torch.cuda.get_device_name() if args.device.startswith("cuda") else "cpu",
                    "torch": torch.__version__, "transformers": __import__("transformers").__version__})
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1))
-    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 2)
+    runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 2,
+                              buckets=buckets)
     n_layers = model.config.num_hidden_layers
 
     # ---- Part A ---------------------------------------------------------------
@@ -157,7 +183,7 @@ def main(argv=None) -> int:
             if c is None:
                 missing.append({"example_id": ex.example_id, "condition": "item1", "m": m})
                 continue
-            e2 = P.encode(Hi.replace_target_slot(ex, 0, c), tok, vocab, template="eval", with_target=True)
+            e2 = P.encode(Hi.replace_target_slot(ex, 0, c), tok, vocab, template=template, with_target=True)
             Hi.check_replacement(clean[i], e2, 0, m, role="target_sid")
             if m == 0:
                 corr[i] = e2
@@ -168,7 +194,7 @@ def main(argv=None) -> int:
         if c is None:
             missing.append({"example_id": ex.example_id, "condition": "hist1", "m": 0})
         elif "A" in parts:
-            e2 = P.encode(Hi.replace_history_item(ex, k, c), tok, vocab, template="eval", with_target=True)
+            e2 = P.encode(Hi.replace_history_item(ex, k, c), tok, vocab, template=template, with_target=True)
             Hi.check_replacement(clean[i], e2, k, 0)
             push(Job(e2, meta={"i": i, "condition": "hist1", "m": 0, "control_item": c.item_id}))
     if buf:
@@ -190,8 +216,8 @@ def main(argv=None) -> int:
         ctrl_sites = [f"model.layers.{L}" for L in CONTROL_LAYERS]
         brecs, crecs, inv, batch = [], [], 0.0, 0
         t0 = time.time()
-        for start in range(0, len(examples), runner.B):
-            idx = list(range(start, min(len(examples), start + runner.B)))
+        # One length bucket per batch: the clean/corrupted captures feed patches of the same rows.
+        for idx in runner.batches(range(len(examples)), lambda i: len(clean[i])):
             cl_jobs = [Job(clean[i], j, meta={"i": i, "condition": "clean", "layer": -1, "group": ""})
                        for j, i in enumerate(idx)]
             co_jobs = [Job(corr[i], j, meta={"i": i, "condition": "corrupted", "layer": -1, "group": ""})
@@ -230,7 +256,7 @@ def main(argv=None) -> int:
                     crecs.append({"example_id": jb.enc.example.example_id, "control": kind,
                                   "layer": jb.meta["layer"], "max_abs_diff_code_logits": d_, "exact": d_ == 0.0})
                 batch += 1
-            log(f"[B] {idx[-1] + 1}/{len(examples)} rows, {runner.n_forwards} forwards, {time.time() - t0:.0f}s")
+            log(f"[B] {max(idx) + 1}/{len(examples)} rows, {runner.n_forwards} forwards, {time.time() - t0:.0f}s")
         pd.DataFrame(brecs).to_parquet(args.out / "part_b.parquet", index=False)
         c = pd.DataFrame(crecs)
         c.to_parquet(args.out / "controls.parquet", index=False)

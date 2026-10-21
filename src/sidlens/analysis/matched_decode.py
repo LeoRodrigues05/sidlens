@@ -14,11 +14,19 @@ independent of chunk size.
 We keep duplicate partial paths during search, matching the path-beam design;
 at the end each SID receives its best surviving path score, not a sum across
 orders. These scores are ranking scores, not normalized item probabilities.
+
+Two optional arguments open the loop without forking it. ``observer`` sees
+every step (the states scored, their distributions, and what was committed)
+and must not change anything. ``score_fn`` replaces the per-step scorer, which
+is the only way one step's prediction can come from a different run: nothing
+but the partial SID and the beam score passes between steps (self-attention is
+recomputed, cross-attention K/V depend on the history alone). With both left
+as None the search is the validated one, bit for bit.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 
 import torch
@@ -44,6 +52,31 @@ class DecodeResult:
     invalid_counts: Tensor
     legal_unique_counts: Tensor
     beam_sizes: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class DecodeStep:
+    """One reveal step, as the search saw it. Tensors are on the input device.
+
+    ``states`` [batch, active, depth] are the partial SIDs that were scored
+    (-1 = masked) and ``state_scores`` [batch, active] their accumulated
+    log-probabilities. ``log_probs`` [batch, active, depth, vocabulary] are the
+    per-position distributions at those states; entries at revealed positions
+    are outputs the model was never trained on and must not be read. The
+    commit that followed is ``parents`` / ``positions`` / ``codes`` / ``scores``
+    [batch, kept]: new path j extends ``states[:, parents[:, j]]`` by writing
+    ``codes[:, j]`` at ``positions[:, j]``. The tensors are the search's own:
+    an observer that keeps them must not modify them in place.
+    """
+
+    step: int
+    states: Tensor
+    state_scores: Tensor
+    log_probs: Tensor
+    parents: Tensor
+    positions: Tensor
+    codes: Tensor
+    scores: Tensor
 
 
 def _top_candidates(scores: Tensor, width: int) -> tuple[Tensor, Tensor]:
@@ -76,6 +109,40 @@ def _project_cross_cache(model, encoder_hidden: Tensor):
     return cross_cache
 
 
+def score_partial(model, encoder_hidden: Tensor, cross_cache, partial: Tensor,
+                  history_rows: Tensor) -> Tensor:
+    """Log-softmax digit distributions [rows, depth, vocabulary] at partial SIDs.
+
+    ``partial`` [rows, depth] holds revealed codes, -1 where masked;
+    ``history_rows`` [rows] names each row's history in ``encoder_hidden`` and
+    ``cross_cache`` (from ``_project_cross_cache``, or None for a generic test
+    model). This is the search's own per-chunk forward; a ``score_fn`` built on
+    it differs from the default only in the histories it points at. The raw
+    logits are checked here, before the softmax, as the search always did.
+    """
+    past_key_values = None if cross_cache is None else [
+        (None, (key.index_select(0, history_rows), value.index_select(0, history_rows)))
+        for key, value in cross_cache
+    ]
+    output = model.forward_decoder_only(
+        {
+            "decoder_input_ids": partial.clamp_min(0),
+            "mask_positions": (partial < 0).to(torch.float32),
+            "encoder_hidden": encoder_hidden.index_select(0, history_rows),
+        },
+        return_loss=False,
+        digit=None,
+        past_key_values=past_key_values,
+        use_cache=True,
+    )
+    logits = output.logits
+    if tuple(logits.shape) != (partial.shape[0], partial.shape[1], int(model.codebook_size)):
+        raise ValueError(f"unexpected decoder logits shape {tuple(logits.shape)}")
+    if not torch.isfinite(logits).all():
+        raise ValueError("decoder produced nonfinite logits")
+    return torch.log_softmax(logits.float(), dim=-1)
+
+
 @torch.inference_mode()
 def decode(
     model,
@@ -87,6 +154,8 @@ def decode(
     top_k: int = 10,
     allowed_sids: Collection[tuple[int, ...]] | None = None,
     decoder_chunk_size: int = 256,
+    observer: Callable[[DecodeStep], None] | None = None,
+    score_fn: Callable[[int, Tensor, Tensor], Tensor] | None = None,
 ) -> DecodeResult:
     """Decode one SID per history with only reveal-position choice varied.
 
@@ -96,6 +165,13 @@ def decode(
     be active (e.g. fixed decoding at step one when beam_width > vocabulary).
     ``decoder_chunk_size`` limits repeated-history decoder rows in one forward.
     All logits and accumulation scores are evaluated as float32 for ranking.
+
+    ``observer`` is called once per step with a ``DecodeStep``. ``score_fn(step,
+    partial, history_rows)`` returns float32 log-probabilities [rows, depth,
+    vocabulary] for one chunk and replaces ``score_partial`` on this function's
+    ``encoder_hidden``, which then only sets the batch size and device. Its
+    output is checked for shape and for NaN or +inf; -inf is a legal
+    log-probability.
     """
     if getattr(model, "training", False):
         raise ValueError("matched decoding requires model.eval()")
@@ -127,11 +203,12 @@ def decode(
     beam_scores = torch.zeros((batch_size, 1), device=device, dtype=torch.float32)
     beam_sizes: list[int] = []
     batch_indices = torch.arange(batch_size, device=device)[:, None]
-    cross_cache = _project_cross_cache(model, encoder_hidden)
+    cross_cache = None if score_fn is not None else _project_cross_cache(model, encoder_hidden)
 
     for step in range(depth):
         active = beam_ids.shape[1]
         flat_ids = beam_ids.reshape(-1, depth)
+        state_scores = beam_scores
         chunks = []
         for start in range(0, flat_ids.shape[0], decoder_chunk_size):
             stop = min(start + decoder_chunk_size, flat_ids.shape[0])
@@ -140,27 +217,17 @@ def decode(
             # that cross a history boundary. Never slice a wider repeated
             # encoder buffer as a substitute for this explicit row mapping.
             original_rows = torch.arange(start, stop, device=device) // active
-            past_key_values = None if cross_cache is None else [
-                (None, (key.index_select(0, original_rows), value.index_select(0, original_rows)))
-                for key, value in cross_cache
-            ]
-            output = model.forward_decoder_only(
-                {
-                    "decoder_input_ids": partial.clamp_min(0),
-                    "mask_positions": (partial < 0).to(torch.float32),
-                    "encoder_hidden": encoder_hidden.index_select(0, original_rows),
-                },
-                return_loss=False,
-                digit=None,
-                past_key_values=past_key_values,
-                use_cache=True,
-            )
-            logits = output.logits
-            if tuple(logits.shape) != (stop - start, depth, vocabulary):
-                raise ValueError(f"unexpected decoder logits shape {tuple(logits.shape)}")
-            if not torch.isfinite(logits).all():
-                raise ValueError("decoder produced nonfinite logits")
-            chunks.append(torch.log_softmax(logits.float(), dim=-1))
+            if score_fn is None:
+                chunk = score_partial(model, encoder_hidden, cross_cache, partial, original_rows)
+            else:
+                chunk = score_fn(step, partial, original_rows)
+                if tuple(chunk.shape) != (stop - start, depth, vocabulary):
+                    raise ValueError(f"score_fn returned shape {tuple(chunk.shape)}")
+                if chunk.dtype != torch.float32:
+                    raise ValueError(f"score_fn returned {chunk.dtype}, the search ranks in float32")
+                if torch.isnan(chunk).any() or torch.isposinf(chunk).any():
+                    raise ValueError("score_fn returned NaN or +inf log-probabilities")
+            chunks.append(chunk)
         log_probs = torch.cat(chunks, dim=0).reshape(batch_size, active, depth, vocabulary)
         allowed_positions = beam_ids < 0
         if policy == "fixed":
@@ -178,6 +245,10 @@ def decode(
         parents = selected // (depth * vocabulary)
         positions = (selected // vocabulary) % depth
         codes = selected % vocabulary
+        if observer is not None:
+            observer(DecodeStep(step=step, states=beam_ids, state_scores=state_scores,
+                                log_probs=log_probs, parents=parents, positions=positions,
+                                codes=codes, scores=beam_scores))
         beam_ids = beam_ids[batch_indices, parents].clone()
         beam_ids.scatter_(2, positions[:, :, None], codes[:, :, None])
         beam_sizes.append(beam_ids.shape[1])

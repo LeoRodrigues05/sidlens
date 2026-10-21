@@ -14,6 +14,14 @@ beam search on clean and swapped prompts, in exp6's batches. Its clean arm must
 reproduce exp6's `predictions_B_plain` lists.
 
     python run.py --cell 0 --split test --out <new dir> [--limit 64] [--parts TF,D]
+    python run.py --ckpt 'grid:<key>@best' --split test --out <new dir>
+
+Grid runs (`sidlens.grid`): rows, days and SID table are the run's own (days by
+(user, event position), `sidlens.grid.events`; rows with an unsettled day are
+not eligible), the prompt is OneDiffRec's current one, and Part D is the run's
+own evaluator (`grid.decode_ar`, plain constrained beam search + raw-vocabulary
+rescoring). Its clean arm must reproduce the run's saved `predictions.jsonl`
+(V-D0, `grid.predictions.compare`) before the swap arm counts.
 """
 
 from __future__ import annotations
@@ -36,10 +44,10 @@ from sidlens import paths                                                # noqa:
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.data import timestamps as T                                 # noqa: E402
 from sidlens.data.sids import SidTable                                   # noqa: E402
-from sidlens.interventions.runner import FixedShapeRunner, Job, max_diff, records  # noqa: E402
+from sidlens.interventions.runner import FixedShapeRunner, Job, length_buckets, max_diff, records  # noqa: E402
 from sidlens.interventions.scoring import DigitScorer                    # noqa: E402
 from sidlens.models import ar                                            # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod         # noqa: E402
+from sidlens.provenance import hashing                                   # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
 EXP6_PLAIN = {"next-item_best": "283586/cell-00", "oneoff_rqvae4cb128": "283621/cell-01"}
@@ -49,12 +57,8 @@ NUM_BEAMS, MAX_NEW, LENGTH_PENALTY, EVAL_BATCH, N_SHARDS, PREFIX_INDEX, DECODE_S
 
 
 def checkpoint_sha(ckpt: str) -> str:
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Weights hash, checked against the freeze manifest or the grid registry."""
+    return ar.checkpoint_sha(ckpt)
 
 
 def swap_last_two(ex: P.ArExample) -> P.ArExample:
@@ -148,14 +152,56 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def part_d_grid(args, ckpt, gin, examples, st, tok, validation, log) -> None:
+    """Part D on a grid run: V-D0 against the run's saved lists, then the swap arm."""
+    from sidlens.grid import decode_ar as DA, predictions as GP
+    proto = GP.ar_protocol(gin.entry, require_full=not args.limit)
+    if proto["batch_size"] != 1:
+        raise RuntimeError("the run was evaluated in batches > 1; reproducing it needs its full row order")
+    model = ar.load_model(ckpt, device=args.device, dtype=proto["dtype"] if args.device == "cuda" else "float32")
+    grammar, _ = DA.catalog_grammar(tok, gin.entry["sid_index"]["path"], proto["horizon"])
+    # the evaluator ran with torch's default numerics
+    torch.use_deterministic_algorithms(False)
+    torch.backends.cudnn.allow_tf32 = True
+    order = sorted(range(len(examples)), key=lambda i: examples[i].row)      # the CSV's order
+    exs = [examples[i] for i in order]
+    t0 = time.time()
+    clean = DA.decode_rows(model, tok, grammar, exs, proto, log=log)
+    log(f"[D clean] {len(clean)} rows, {time.time() - t0:.0f}s")
+    v = GP.compare(clean, GP.load(gin.entry), "ar", only_saved=bool(args.limit))
+    validation["V_D0_grid_reproduction"] = v
+    log(f"[D] V-D0 {json.dumps({k: v[k] for k in ('rows', 'identical', 'tie_reordered', 'failed', 'ok')})}")
+    if not v["ok"]:
+        raise RuntimeError("the clean decode does not reproduce the run's saved predictions; Part D stops")
+    elig = {examples[i].example_id for i in range(len(examples)) if st.eligible[i]}
+    sw = [ex for ex in exs if ex.example_id in elig]
+    t0 = time.time()
+    swap = DA.decode_rows(model, tok, grammar, [swap_last_two(ex) for ex in sw], proto, log=log)
+    log(f"[D swap] {len(swap)} rows, {time.time() - t0:.0f}s")
+    recs = []
+    for ex in exs:
+        for cond, lists in (("clean_plain", clean), ("swap_plain", swap)):
+            swapped = cond == "swap_plain" and ex.example_id in swap
+            got = lists[ex.example_id] if (cond == "clean_plain" or swapped) else clean[ex.example_id]
+            recs.append({"example_id": ex.example_id, "row": ex.row, "user_id": ex.user_id, "condition": cond,
+                         "swapped": swapped, "target": ex.target_sids[0],
+                         "predict": ["".join(c["sids"]) for c in got],
+                         "scores": [c["joint_logprob"] for c in got]})
+    pd.DataFrame(recs).to_parquet(args.out / "part_d.parquet", index=False)
+    del model
+    torch.cuda.empty_cache()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
-    ap.add_argument("--ckpt", choices=CELLS)
+    ap.add_argument("--ckpt", choices=CELLS + tuple(n for n in ar.known_checkpoints() if ar.is_grid(n)),
+                    help="a frozen cell or a next-item grid weight state (grid:<key>@<state>)")
     ap.add_argument("--split", default="test", choices=("valid", "test"))
     ap.add_argument("--parts", default="TF,D")
     ap.add_argument("--limit", type=int, default=None, help="first N rows (pilot only)")
     ap.add_argument("--rows", type=int, default=128)
+    ap.add_argument("--device", default="cuda", help="grid runs: cpu runs float32 (smoke tests; bit-exact controls hold on GPU only)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
     if (args.cell is None) == (args.ckpt is None):
@@ -186,30 +232,54 @@ def main(argv=None) -> int:
     vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
     from transformers import AutoTokenizer
-    ckpt_dir = paths.FROZEN_CKPT / "ar" / ckpt
+    ckpt_dir = ar.checkpoint_dir(ckpt)
     tok = AutoTokenizer.from_pretrained(str(ckpt_dir), local_files_only=True)
-    examples = P.load_examples(vocab.variant, "next-item", args.split)
-    table = SidTable.load(vocab.variant)
-    validation = {"table": P.check_against_table(examples, table),
-                  "vocab_vs_table": ar.validate_against(vocab, table)}
-    if args.split == "test":
-        validation["archive"] = P.check_against_archive(examples)
+    grid_info, buckets, gin = {}, None, None
+    if ar.is_grid(ckpt):
+        from sidlens.grid import events as GE, inputs as GI
+        gin = GI.ArSetup(ckpt, args.split, tok, vocab, task="next-item")
+        examples, table, template = gin.examples, gin.table, gin.template
+        validation, grid_info, csv = gin.validation, gin.info, gin.csv
+        if args.limit:                    # a pilot: the first rows in CSV order (those the saved lists start with)
+            examples = sorted(examples, key=lambda e: e.row)[:args.limit]
+        # rows sorted by prompt length once, before the strata, so every table shares the order
+        examples, _ = GI.sort_by_length(examples, [P.encode(ex, tok, vocab, template=template, with_target=True)
+                                                    for ex in examples])
+    else:
+        examples = P.load_examples(vocab.variant, "next-item", args.split)
+        table = SidTable.load(vocab.variant)
+        validation = {"table": P.check_against_table(examples, table),
+                      "vocab_vs_table": ar.validate_against(vocab, table)}
+        if args.split == "test":
+            validation["archive"] = P.check_against_archive(examples)
+        template, csv = "eval", P.csv_path(vocab.variant, "next-item", args.split)
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation, default=str)[:2000]}")
-    ev = T.load_event_times()
-    trows, thist = T.ar_row_times(examples, ev)
+    if gin is not None:
+        ev = GE.event_times(gin.entry)
+        trows, thist = GE.row_times(gin.entry, args.split, [ex.example_id for ex in examples], ev)
+    else:
+        ev = T.load_event_times()
+        trows, thist = T.ar_row_times(examples, ev)
     st = strata(trows, thist, examples, n)
+    if "time_ambiguous" in trows:
+        amb = trows.time_ambiguous.to_numpy()
+        st.loc[amb, ["eligible", "control"]] = False
+        st.loc[amb, "stratum"] = None
     n_full = len(examples)
     if args.limit:
         examples, st = examples[:args.limit], st.iloc[:args.limit].reset_index(drop=True)
     st.to_parquet(args.out / "rows.parquet", index=False)
-    clean = [P.encode(ex, tok, vocab, template="eval", with_target=True) for ex in examples]
+    clean = [P.encode(ex, tok, vocab, template=template, with_target=True) for ex in examples]
     t_pad = -(-max(len(e) for e in clean) // 8) * 8
+    if grid_info:
+        buckets = length_buckets([len(e) for e in clean])
+        t_pad = buckets[-1]
     sha = checkpoint_sha(ckpt)
-    csv = P.csv_path(vocab.variant, "next-item", args.split)
     inputs = {"checkpoint": f"ar/{ckpt}", "checkpoint_sha256": sha, "variant": vocab.variant.name,
-              "n_digits": n, "split": args.split, "template": "eval",
-              "csv": str(csv.relative_to(paths.WORK)), "csv_sha256": hashing.sha256_file(csv),
+              "n_digits": n, "split": args.split, "template": template,
+              "csv": str(csv.relative_to(paths.WORK)) if csv.is_relative_to(paths.WORK) else str(csv),
+              "csv_sha256": hashing.sha256_file(csv),
               "sem_ids_sha256": hashing.sha256_file(table.source), "timestamps": ev.report,
               "n_rows": len(examples), "n_users": len({e.user_id for e in examples}),
               "limited": args.limit, "t_pad": t_pad, "batch_rows": args.rows, "seed": SEED,
@@ -217,7 +287,9 @@ def main(argv=None) -> int:
               "strata": {str(k): int(v) for k, v in st[st.eligible].stratum.value_counts().items()},
               "strata_distinct_d0": {str(k): int(v) for k, v in
                                      st[st.eligible & (st.c1 != st.c2)].stratum.value_counts().items()},
-              "n_controls": int(st.control.sum())}
+              "n_controls": int(st.control.sum()),
+              **({"buckets": buckets, "n_time_ambiguous": int(trows.time_ambiguous.sum()), **grid_info}
+                 if grid_info else {})}
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1, default=str))
     (args.out / "arguments.json").write_text(json.dumps({k: str(v) for k, v in vars(args).items()}, indent=1))
     log(f"inputs ok: {ckpt} {args.split} rows={len(examples)} strata={inputs['strata']} "
@@ -225,12 +297,14 @@ def main(argv=None) -> int:
 
     # ---- Part TF: teacher-forced 2x2 ----------------------------------------
     if "TF" in parts:
-        model = ar.load_model(ckpt, device="cuda", dtype="bfloat16")
+        model = ar.load_model(ckpt, device=args.device, dtype="bfloat16" if args.device == "cuda" else "float32")
         inputs.update({"attn_implementation": model.config._attn_implementation,
-                       "device": torch.cuda.get_device_name(), "torch": torch.__version__,
+                       "device": torch.cuda.get_device_name() if args.device == "cuda" else args.device,
+                       "torch": torch.__version__,
                        "transformers": __import__("transformers").__version__})
         (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1, default=str))
-        runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1)
+        runner = FixedShapeRunner(model, DigitScorer(vocab, table), tok.pad_token_id, t_pad, args.rows, 1,
+                                  buckets=buckets)
         t0 = time.time()
         jobs, recs, logits = [], [], {}
 
@@ -256,7 +330,7 @@ def main(argv=None) -> int:
                 if cond == "clean":
                     e = clean[i]
                 else:
-                    e = P.encode(swap_last_two(ex), tok, vocab, template="eval", with_target=True)
+                    e = P.encode(swap_last_two(ex), tok, vocab, template=template, with_target=True)
                     ch = check_swap(clean[i], e)
                     if st.control[i] and ch:
                         raise AssertionError(f"{ex.example_id}: identical-SID swap changed tokens")
@@ -286,8 +360,12 @@ def main(argv=None) -> int:
         del model
         torch.cuda.empty_cache()
 
+    # ---- Part D (grid): the run's own evaluator on clean and swapped prompts --
+    if "D" in parts and gin is not None:
+        part_d_grid(args, ckpt, gin, examples, st, tok, validation, log)
+
     # ---- Part D: plain beam search on clean and swapped prompts --------------
-    if "D" in parts:
+    if "D" in parts and gin is None:
         from transformers import AutoModelForCausalLM, GenerationConfig, LogitsProcessorList
         info_file = paths.FROZEN_SIDS / "info" / "next-item" / f"{P.PRIMARY_CATEGORY}_{vocab.variant.name}.txt"
         trie = build_trie(tok, info_file)

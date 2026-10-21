@@ -37,10 +37,8 @@ from safetensors.numpy import load_file
 HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[3] / "src"))
 
-from sidlens import paths                                                # noqa: E402
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.data import ar_prompts as P                                 # noqa: E402
-from sidlens.data import meta as meta_mod                                # noqa: E402
-from sidlens.data import timestamps as T                                 # noqa: E402
 from sidlens.hooks.store import StoreReader                              # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
@@ -54,17 +52,17 @@ KIND = {"pos_recency": "format", "own_code": "token", "item_d0": "own item", "it
         "match_prefix": "match", "same_day": "burst"}
 
 
-def token_table(store: StoreReader, greedy: pd.DataFrame, variant: str, n: int) -> pd.DataFrame:
+def token_table(store: StoreReader, greedy: pd.DataFrame, ckpt: str, n: int) -> pd.DataFrame:
     """One row per stored token with its group and every variable (NaN where undefined)."""
     rows = store.rows.reset_index(drop=True)
-    ex = {e.example_id: e for e in P.load_examples(variant, "next-item", "test")}
+    ex = {e.example_id: e for e in AI.examples(ckpt, "test")}
     g = greedy.set_index("example_id")
     if set(rows.example_id) - set(g.index):
         raise ValueError("store rows without a self-greedy answer")
-    meta = meta_mod.load(P.PRIMARY_CATEGORY)
+    meta = AI.item_meta(ckpt)
     brand_of = {m.item_id: " ".join(m.brand.lower().split()) for m in meta.values()}
     top = pd.Series(list(brand_of.values())).replace("", np.nan).dropna().value_counts().head(50).index
-    rt, _ = T.ar_row_times(list(ex.values()), T.load_event_times())
+    rt, _ = AI.row_times(ckpt, list(ex.values()), "test")
     same_day = rt.set_index("example_id").gap1_days.eq(0)
 
     hdr = rows.role == "response_header"
@@ -144,21 +142,25 @@ def census_group(A, tok: pd.DataFrame, variables: list[str], rng, live):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a grid weight state (grid:<key>@<state>) instead of --cell")
     ap.add_argument("--test-capture", type=Path, required=True, help="ar_capture --out dir (holds store/)")
     ap.add_argument("--sae-run", type=Path, required=True, help="train_sae.py output (one cell)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
+    if (args.cell is None) == (args.ckpt is None):
+        ap.error("give exactly one of --cell or --ckpt")
+    ckpt = args.ckpt or CELLS[args.cell]
     args.out.mkdir(parents=True, exist_ok=False)
     t0 = time.time()
     root = args.test_capture
-    store = StoreReader(root / "store", verify=False)
-    if store.meta.get("target") != "self-greedy" or store.meta["split"] != "test":
+    store = AI.capture_store(root, ckpt, "test", verify=False)
+    if store.meta.get("target") != "self-greedy":
         raise RuntimeError("census needs the self-greedy test capture")
     variant = store.meta["variant"]
     n = int(variant.split("_")[1][0])
     greedy = pd.read_csv(root / "self_greedy.csv")
-    tok = token_table(store, greedy, variant, n)
+    tok = token_table(store, greedy, ckpt, n)
     tok.drop(columns=[]).to_parquet(args.out / "tokens.parquet", index=False)
     layers = sorted(int(p.stem.split("_L")[1]) for p in args.sae_run.glob("test_latents_L*.safetensors"))
     rng = np.random.default_rng(SEED)

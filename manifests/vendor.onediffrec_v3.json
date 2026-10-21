@@ -1,0 +1,66 @@
+{
+ "description": "Byte copies of the OneDiffRec files that the grid-v1 runs (disjoint_horizon_v3) depend on: the AR and DiffGRM joint evaluators, the v3 DiffGRM decoder, the SFT dataset classes (prompt wording), the cohort splitter and builder, the metrics, and run provenance. Copied with `git show 7ae3512:<path>` from https://github.com/niandd/OneDiffRec (branch leo-dev-changes). Paths mirror the OneDiffRec repository.",
+ "files": {
+  "DiffGRM_new/genrec/horizon_split.py": {
+   "sha256": "df7d673e775b905219e0b5ada4a92b389b1458b94172ac95e2379a0cff0caae3",
+   "size": 2521
+  },
+  "DiffGRM_new/genrec/models/DIFF_GRM/joint_decode.py": {
+   "sha256": "82b76b6d5b3ee973f76c8398e8e1ef08f464c4f6b040e65afd5a0966d346eae9",
+   "size": 8193
+  },
+  "metrics/__init__.py": {
+   "sha256": "964b8d8b27739ff83b711995b02006d1e76c088f599af2a97c5099239e3d9cab",
+   "size": 559
+  },
+  "metrics/collision.py": {
+   "sha256": "7babbac7c95de7e2087504f29c479ab867d767188c73236566c089de9fd8487a",
+   "size": 14951
+  },
+  "metrics/current_cce.py": {
+   "sha256": "91216ea055e3396efa73b0bf3dde445ae65e68509bb6af8db116d96cbde0f0f9",
+   "size": 6809
+  },
+  "metrics/ordered_targets.py": {
+   "sha256": "2df7b66cecfe112b39f32e04bf074c7fb1740d5c585b4062b66ac27d71a53831",
+   "size": 5648
+  },
+  "scripts/__init__.py": {
+   "sha256": "e26b8614c493bb561ea95506035f2dede13edd29384b80b0a158f3d08f985bee",
+   "size": 56
+  },
+  "scripts/ar/__init__.py": {
+   "sha256": "698499e778d28686f70ca0d35d37c779ec05275d06a3f30a97d64f03b28ddd59",
+   "size": 59
+  },
+  "scripts/ar/data.py": {
+   "sha256": "446a72e79dd2a42af62bc6612920639a55ee6597a8a4ec2413985edc7688069b",
+   "size": 83700
+  },
+  "scripts/evaluate_ar_joint.py": {
+   "sha256": "a930551d2a38c194c297eb4d1394fdfc6945f426dcd24a611121a77124945f7b",
+   "size": 20660
+  },
+  "scripts/evaluate_diff_joint.py": {
+   "sha256": "ac93d9554f4e29f0ef156201a03b8659b2c2edf5344be567021d76a6270a6b6a",
+   "size": 12364
+  },
+  "scripts/experiment_data.py": {
+   "sha256": "15d4aa27be5f7391cacf3bb6dda396686d17e95f1e82457dd683b9f7e3a3932f",
+   "size": 14096
+  },
+  "scripts/run_provenance.py": {
+   "sha256": "f28bdb18488ff52b4da172b4f43a5719a2023eec45839813eb278cfae60d9560",
+   "size": 35765
+  }
+ },
+ "merkle_root": "eddacab9aa50b01de802654ee335a52ba23b5d1a99607e37b3cb726d433135a6",
+ "name": "onediffrec_v3",
+ "schema": "sidlens.vendor-manifest/v1",
+ "source": {
+  "branch": "leo-dev-changes",
+  "commit": "7ae3512d15b72a722ce648b88dd55fafb2af92c4",
+  "copied": "2026-10-21",
+  "repository": "https://github.com/niandd/OneDiffRec"
+ }
+}

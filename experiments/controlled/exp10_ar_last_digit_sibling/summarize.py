@@ -78,11 +78,17 @@ def estimands(w: pd.DataFrame, tag: dict) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--run", action="append", required=True, help="split=group_dir")
+    ap.add_argument("--run", action="append", default=[], help="split=group_dir")
+    ap.add_argument("--cells", type=Path, nargs="*", default=[], help="cell dirs (grid layout)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
     res, sources = [], {}
+    for d in args.cells:                                  # grid cells: split and run from inputs.json
+        inp = json.loads((d / "inputs.json").read_text())
+        name = inp.get("grid_key", inp["variant"]) + "@" + inp.get("grid_state", "")
+        sources[f"{inp['split']}/{name}"] = str(d)
+        res += estimands(load_cell(d), {"split": inp["split"], "variant": name})
     for spec in args.run:
         split, root = spec.split("=", 1)
         for cell, name in CELL_NAMES.items():

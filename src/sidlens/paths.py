@@ -21,6 +21,14 @@ DERIVED = WORK / "derived"
 RUNS = WORK / "runs"
 CACHE = WORK / "cache"
 
+# Everything the grid pipeline (sidlens.grid) writes about the OneDiffRec grid
+# runs: registry, checks, every experiment's cells, summaries. One folder, so it
+# can be shipped back whole from the cluster that holds the runs.
+RESULTS = Path(os.environ.get("SIDLENS_RESULTS", str(WORK / "results_remote")))
+# Working files of the grid pipeline (activation captures) that never leave the
+# cluster; each model's captures are deleted once its experiments finish.
+SCRATCH = Path(os.environ.get("SIDLENS_SCRATCH", str(WORK / "scratch")))
+
 # Third-party data pulled in AFTER the freeze -- public dumps, re-downloads of
 # things upstream stripped. Deliberately NOT under FROZEN: the frozen substrate
 # is the bytes the models were trained on and must stay exactly that. External

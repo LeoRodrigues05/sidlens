@@ -32,6 +32,11 @@ metrics.
 
     python scripts/activations/ar_capture.py --ckpt next-item_best --template eval \\
         --layers 0,7,14,21,27 --limit 64 --out $SIDLENS_WORK/derived/ar_capture/pilot
+
+Grid weight states (`--ckpt grid:<key>@<state>`, `--template v3`): the rows are
+the run's prepared split (Office: the fixed 6,297-user sample, train rows of
+the same users), checked against the run's SID table and OneDiffRec's prompt
+code instead of an archive (`sidlens.grid.inputs.ArSetup`).
 """
 
 from __future__ import annotations
@@ -48,26 +53,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import torch                                                  # noqa: E402
 
-from sidlens import hooks as H, paths                         # noqa: E402
+from sidlens import hooks as H                                # noqa: E402
 from sidlens.data import ar_prompts as P                      # noqa: E402
 from sidlens.data.sids import SidTable                        # noqa: E402
 from sidlens.hooks.store import StoreWriter                   # noqa: E402
 from sidlens.models import ar                                 # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod  # noqa: E402
 
-TASK_OF = {"next-item_best": "next-item", "oneoff_rqvae4cb128": "next-item",
-           "two-item_best": "two-item"}
 DEFAULT_ROLES = ("hist_sid", "response_header", "target_sid")
 
 
 def checkpoint_sha(ckpt: str) -> str:
-    """Hash the weights and compare with the snapshot; refuse on mismatch."""
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Hash the weights and compare with the snapshot or grid registry; refuse on mismatch."""
+    return ar.checkpoint_sha(ckpt)
 
 
 def targets(e: P.Encoded, vocab) -> list[tuple[int, int, int]]:
@@ -119,7 +116,7 @@ def catalogue_trie(table: SidTable, n: int):
     return {k: sorted(v) for k, v in nxt.items()}, comp
 
 
-def self_greedy(model, examples, tok, vocab, template, device, batch_size):
+def self_greedy(model, examples, tok, vocab, template, device, batch_size, table=None):
     """The model's trie-constrained greedy SID for every (single-slot) example.
 
     Digit d is read at `predict_pos(0, d)` of a teacher-forced input whose first
@@ -130,7 +127,7 @@ def self_greedy(model, examples, tok, vocab, template, device, batch_size):
     """
     from sidlens.interventions.history import sid_string
     n = vocab.variant.n_codebook
-    nxt, comp = catalogue_trie(SidTable.load(vocab.variant), n)
+    nxt, comp = catalogue_trie(table if table is not None else SidTable.load(vocab.variant), n)
     prefixes = [()] * len(examples)
     logps = [[] for _ in examples]
     for d in range(n):
@@ -160,9 +157,11 @@ def self_greedy(model, examples, tok, vocab, template, device, batch_size):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--ckpt", required=True, choices=sorted(ar.AR_CHECKPOINTS))
+    ap.add_argument("--ckpt", required=True, choices=ar.known_checkpoints(),
+                    help="a frozen checkpoint or a grid weight state (grid:<key>@<state>)")
     ap.add_argument("--template", required=True, choices=P.TEMPLATES,
-                    help="eval = the archived-prediction wording; sft = training wording")
+                    help="eval = the archived-prediction wording; sft = training wording; "
+                         "v3 = OneDiffRec's current prompt (grid runs)")
     ap.add_argument("--split", default="test", choices=P.SPLITS)
     ap.add_argument("--layers", default="all",
                     help="'all' or comma list of decoder layer indices; 'norm' adds model.norm")
@@ -183,15 +182,23 @@ def main(argv=None) -> int:
     roles = tuple(r for r in args.roles.split(",") if r)
 
     # ---- inputs, validated before the model is touched ---------------------
+    from sidlens.data import ar_inputs as AI
     vocab = ar.load_vocab(args.ckpt)
-    task = TASK_OF[args.ckpt]
+    task = AI.task(args.ckpt)
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(str(paths.FROZEN_CKPT / "ar" / args.ckpt),
-                                        local_files_only=True)
-    examples = P.load_examples(vocab.variant, task, args.split)
-    validation = {"table": P.check_against_table(examples)}
-    if args.split == "test":
-        validation["archive"] = P.check_against_archive(examples)
+    tok = AutoTokenizer.from_pretrained(str(ar.checkpoint_dir(args.ckpt)), local_files_only=True)
+    grid_info, table = {}, None
+    if ar.is_grid(args.ckpt):
+        if args.template != "v3":
+            raise ValueError("grid runs were trained and tested with the v3 prompt; pass --template v3")
+        from sidlens.grid import inputs as GI
+        gin = GI.ArSetup(args.ckpt, args.split, tok, vocab, task=task)
+        examples, validation, grid_info, table = gin.examples, gin.validation, gin.info, gin.table
+    else:
+        examples = P.load_examples(vocab.variant, task, args.split)
+        validation = {"table": P.check_against_table(examples)}
+        if args.split == "test":
+            validation["archive"] = P.check_against_archive(examples)
     if not all(v["ok"] for v in validation.values()):
         raise RuntimeError(f"input validation failed: {json.dumps(validation)[:2000]}")
     examples = examples[:args.limit] if args.limit else examples
@@ -202,7 +209,7 @@ def main(argv=None) -> int:
     model = ar.load_model(args.ckpt, device=args.device, dtype=dtype)
     greedy = None
     if args.target == "self-greedy":
-        sids, lps = self_greedy(model, examples, tok, vocab, args.template, args.device, args.batch_size)
+        sids, lps = self_greedy(model, examples, tok, vocab, args.template, args.device, args.batch_size, table)
         greedy = [{"example_id": ex.example_id, "row": ex.row, "user_id": ex.user_id,
                    "golden_sid": ex.target_sids[0], "greedy_sid": g,
                    "greedy_logp_codes": ";".join(f"{x:.6f}" for x in lp)}
@@ -225,7 +232,7 @@ def main(argv=None) -> int:
             "sites_are": "decoder-layer outputs (residual stream after the block)",
             "roles": list(roles), "batch_size": args.batch_size, "padding": "right",
             "teacher_forced": True, "target": args.target, "n_examples": len(encoded),
-            "torch": torch.__version__}
+            "torch": torch.__version__, **grid_info}
     args.out.mkdir(parents=True, exist_ok=False)
     if greedy is not None:
         with open(args.out / "self_greedy.csv", "w", newline="") as fh:

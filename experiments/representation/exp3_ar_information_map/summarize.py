@@ -2,6 +2,8 @@
 """Summary of representation exp3: estimates, figures and the E1-E6 verdicts.
 
     python summarize.py --group <dir with cell-00/ cell-01/> --out <new dir>
+    python summarize.py --cell-dir <one grid model's dir> --ckpt 'grid:<key>@<state>' \
+        [--plain <exp6 grid cell>/predictions_B_plain.parquet] --out <new dir>
 
 Each cell dir must hold capture-test/, sae/, lens/ and exactly one census-*/.
 Intervals: paired user bootstrap over test users (2,000 draws, seed 20260927),
@@ -23,10 +25,12 @@ sys.path.insert(0, str(HERE.parents[3] / "src"))
 
 from sidlens import paths                                                # noqa: E402
 from sidlens.analysis.bootstrap import UserBootstrap                     # noqa: E402
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.viz import style as S                                       # noqa: E402
 
 CELLS = {0: "rqkmeans_3codebook_128", 1: "rqvae_4codebook_128"}
+FROZEN_CKPT = {0: "next-item_best", 1: "oneoff_rqvae4cb128"}
 EXP6_PLAIN = {0: "283586/cell-00", 1: "283621/cell-01"}
 DRAWS, SEED = 2000, 20260927
 KIND_COLOR = {"format": "#eda100", "token": "#2a78d6", "own item": "#1baf7a", "previous item": "#4a3aa7",
@@ -79,9 +83,9 @@ def decoder_estimates(dt: pd.DataFrame, boot, tag, rule):
     return out
 
 
-def rules(cell: int, variant: str, n: int, dt: pd.DataFrame):
+def rules(ckpt: str, n: int, dt: pd.DataFrame):
     """Rule baselines on the same test tokens: copy r1; most frequent SID given digit 0."""
-    ex = {e.example_id: e for e in P.load_examples(variant, "next-item", "test")}
+    ex = {e.example_id: e for e in AI.examples(ckpt, "test")}
     r = {}
     a = dt[(dt.task == "answer_at_R0") & (dt.layer == dt.layer.iloc[0])]
     copy = np.array([P.parse_sid(ex[i].history_sids[-1], n) == tuple(map(int, t.split(",")))
@@ -90,7 +94,7 @@ def rules(cell: int, variant: str, n: int, dt: pd.DataFrame):
     gd = dt[(dt.task == "golden_at_R0") & (dt.layer == dt.layer.iloc[0])]
     copyg = np.array([ex[i].history_sids[-1] == ex[i].target_sids[0] for i in gd.example_id])
     r["golden_at_R0:exact copy rule"] = (gd.user_id.to_numpy(), copyg)
-    train = P.load_examples(variant, "next-item", "train")
+    train = AI.examples(ckpt, "train")
     cnt = pd.Series([P.parse_sid(s, n) for e in train for s in e.history_sids]).value_counts()
     mode = {}
     for sid in cnt.index:
@@ -105,7 +109,7 @@ def rules(cell: int, variant: str, n: int, dt: pd.DataFrame):
 def fig_infomap(summ: dict, out: Path):
     import matplotlib.pyplot as plt
     S.apply()
-    for cell, sm in summ.items():
+    for name, sm in summ.items():
         groups = sorted(sm.group.unique(), key=lambda g: (g[0], int(g.split("_")[1])))
         fig, axes = plt.subplots(1, len(groups), figsize=(1.9 * len(groups), 2.2), sharey=True)
         for ax, gname in zip(np.atleast_1d(axes), groups):
@@ -120,15 +124,16 @@ def fig_infomap(summ: dict, out: Path):
             ax.set_xlabel("layer")
         np.atleast_1d(axes)[0].set_ylabel("share of live latents")
         S.legend_outside(np.atleast_1d(axes)[-1], fontsize=6.5, frameon=False)
-        fig.suptitle(CELLS[cell], fontsize=8)
-        S.save(fig, out / f"fig1_information_map_{CELLS[cell]}")
+        fig.suptitle(name, fontsize=8)
+        S.save(fig, out / f"fig1_information_map_{name.replace('/', '_')}")
 
 
-def fig_lens(est: pd.DataFrame, out: Path):
+def fig_lens(est: pd.DataFrame, out: Path, names):
     import matplotlib.pyplot as plt
     S.apply()
-    fig, axes = plt.subplots(1, 2, figsize=(6.4, 2.3), sharey=True)
-    for ax, (cell, name) in zip(axes, CELLS.items()):
+    fig, axes = plt.subplots(1, len(names), figsize=(3.2 * len(names), 2.3), sharey=True, squeeze=False)
+    axes = axes[0]
+    for ax, name in zip(axes, names):
         e = est[(est.variant == name) & (est.part == "L1") & (est.estimand == "D2 whole SID")]
         for lens, ls in (("tuned", "-"), ("logit", "--")):
             g = e[e.lens == lens].assign(L=lambda x: x.layer.astype(int)).sort_values("L")
@@ -146,12 +151,13 @@ def fig_lens(est: pd.DataFrame, out: Path):
     S.save(fig, out / "fig2_sid_lens")
 
 
-def fig_decoders(est: pd.DataFrame, out: Path):
+def fig_decoders(est: pd.DataFrame, out: Path, names):
     import matplotlib.pyplot as plt
     S.apply()
     tasks = ["item_at_last", "item_at_first", "prev_item_at_last", "r1_at_R0", "answer_at_R0", "golden_at_R0"]
-    fig, axes = plt.subplots(2, len(tasks), figsize=(2.0 * len(tasks), 3.8), sharey=True)
-    for row, (cell, name) in enumerate(CELLS.items()):
+    fig, axes = plt.subplots(len(names), len(tasks), figsize=(2.0 * len(tasks), 1.9 * len(names)), sharey=True,
+                             squeeze=False)
+    for row, name in enumerate(names):
         for ax, task in zip(axes[row], tasks):
             e = est[(est.variant == name) & (est.part == "L2") & (est.task == task) & (est.estimand == "exact")]
             num = e[e.layer.astype(str).str.isdigit()].assign(L=lambda x: x.layer.astype(int)).sort_values("L")
@@ -169,41 +175,52 @@ def fig_decoders(est: pd.DataFrame, out: Path):
                 nc = nc[nc.layer.astype(str).str.isdigit()].assign(L=lambda x: x.layer.astype(int)).sort_values("L")
                 ax.plot(nc.L, nc.est.astype(float), color=S.QUANTIZER_COLOR["rqkmeans"], lw=1.0)
             ax.set_title(task if row == 0 else "", fontsize=7)
-            if row == 1:
+            if row == len(names) - 1:
                 ax.set_xlabel("layer")
         axes[row, 0].set_ylabel(f"{name}\nexact SID")
     S.save(fig, out / "fig3_sid_decoders")
 
 
-def main() -> int:
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--group", type=Path, required=True)
+    ap.add_argument("--group", type=Path, help="frozen run group (cell-00/, cell-01/)")
+    ap.add_argument("--cell-dir", type=Path, help="one grid model's folder")
+    ap.add_argument("--ckpt", help="with --cell-dir: its grid weight state")
+    ap.add_argument("--plain", type=Path, help="with --cell-dir: exp6's predictions_B_plain.parquet, if run")
     ap.add_argument("--out", type=Path, required=True)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+    if (args.group is None) == (args.cell_dir is None) or (args.cell_dir and not args.ckpt):
+        ap.error("give --group, or --cell-dir with --ckpt")
+    from sidlens.models import ar
+    if args.group is not None:
+        cells = [(args.group / f"cell-{c:02d}", name, FROZEN_CKPT[c],
+                  paths.DERIVED / "controlled" / "exp6_ar_copy_in_decoding" / EXP6_PLAIN[c]
+                  / "predictions_B_plain.parquet") for c, name in CELLS.items()]
+    else:
+        cells = [(args.cell_dir, ar.load_vocab(args.ckpt).variant.name, args.ckpt, args.plain)]
     args.out.mkdir(parents=True, exist_ok=False)
     est, summ, verdict, d4s, sources = [], {}, {}, {}, {}
-    for cell, name in CELLS.items():
-        cd = args.group / f"cell-{cell:02d}"
+    for cd, name, ckpt, plain in cells:
         cens = sorted(cd.glob("census-*/result"))
         if len(cens) != 1:
             raise RuntimeError(f"{cd}: expected exactly one census run, found {len(cens)}")
-        sources[name] = {"cell": str(cd), "census": str(cens[0])}
-        n = 3 if cell == 0 else 4
+        sources[name] = {"cell": str(cd), "census": str(cens[0]), "checkpoint": ckpt}
+        n = ar.load_vocab(ckpt).variant.n_codebook
         tag = {"variant": name}
         g = pd.read_csv(cd / "capture-test" / "self_greedy.csv")
         boot = UserBootstrap(g.user_id, draws=DRAWS, seed=SEED)
         est.append({**tag, "part": "C", "estimand": "greedy = golden",
                     **ci(boot, g.user_id, g.greedy_sid == g.golden_sid)})
-        bp = pd.read_parquet(paths.DERIVED / "controlled" / "exp6_ar_copy_in_decoding" / EXP6_PLAIN[cell]
-                             / "predictions_B_plain.parquet").set_index("example_id").predict
-        est.append({**tag, "part": "C", "estimand": "greedy = plain-beam top-1",
-                    **ci(boot, g.user_id, [s == list(bp.loc[i])[0] for i, s in zip(g.example_id, g.greedy_sid)])})
+        if plain is not None and Path(plain).exists():
+            bp = pd.read_parquet(plain).set_index("example_id").predict
+            est.append({**tag, "part": "C", "estimand": "greedy = plain-beam top-1",
+                        **ci(boot, g.user_id, [s == list(bp.loc[i])[0] for i, s in zip(g.example_id, g.greedy_sid)])})
         sm = pd.read_csv(cens[0] / "summary.csv")
-        summ[cell] = sm
+        summ[name] = sm
         lt = pd.read_parquet(cd / "lens" / "lens_tokens.parquet")
         e1, d4 = lens_estimates(lt, boot, n, tag)
         est += e1
-        ex = {e.example_id: e for e in P.load_examples(name, "next-item", "test")}
+        ex = {e.example_id: e for e in AI.examples(ckpt, "test")}
         d4["repeat_target"] = [ex[i].target_sids[0] in ex[i].history_sids for i in d4.index]
         d4s[name] = d4
         for k, sub in (("all", d4), ("copy answer", d4[d4.copy_ans]), ("non-copy answer", d4[~d4.copy_ans]),
@@ -217,7 +234,7 @@ def main() -> int:
         cp = {i: P.parse_sid(ex[i].history_sids[-1], n) for i in ex}
         dt["copy_answer"] = [bool(t == ",".join(map(str, cp[i]))) for i, t in zip(dt.example_id, dt.target)]
         dt.loc[~a, "copy_answer"] = False
-        est += decoder_estimates(dt, boot, tag, rules(cell, name, n, dt))
+        est += decoder_estimates(dt, boot, tag, rules(ckpt, n, dt))
         beyond = pd.read_json(cens[0] / "answer_beyond_copy.json")
         verdict[name] = {"census_answer_beyond_copy_R0": [] if beyond.empty else beyond[beyond.group == "R_0"][
             ["layer", "n_answer_latents", "n_beyond_copy"]].to_dict("records")}
@@ -225,12 +242,13 @@ def main() -> int:
         verdict[name]["sae_fvu_test_all"] = {k: v["fvu_test"]["all"] for k, v in fid.items()}
     est = pd.DataFrame(est)
     est.to_csv(args.out / "estimates.csv", index=False)
-    pd.concat([s.assign(variant=CELLS[c]) for c, s in summ.items()]).to_csv(args.out / "census_summary.csv", index=False)
+    pd.concat([s.assign(variant=c) for c, s in summ.items()]).to_csv(args.out / "census_summary.csv", index=False)
     for name, d4 in d4s.items():
         d4.to_csv(args.out / f"d4_first_stable_layer__{name}.csv")
     fig_infomap(summ, args.out / "figures")
-    fig_lens(est, args.out / "figures")
-    fig_decoders(est, args.out / "figures")
+    names = [c[1] for c in cells]
+    fig_lens(est, args.out / "figures", names)
+    fig_decoders(est, args.out / "figures", names)
     (args.out / "verdict_inputs.json").write_text(json.dumps(verdict, indent=1, default=str))
     (args.out / "sources.json").write_text(json.dumps(sources, indent=1))
     L = ["# Representation exp3: generated summary", "",

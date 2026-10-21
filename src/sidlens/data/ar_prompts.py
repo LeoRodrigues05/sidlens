@@ -71,7 +71,7 @@ from sidlens.data.sids import SidTable, SidVariant, load_item2id
 PRIMARY_CATEGORY = "Industrial_and_Scientific"
 TASKS = ("next-item", "two-item")
 SPLITS = ("train", "valid", "test")
-TEMPLATES = ("eval", "sft")
+TEMPLATES = ("eval", "sft", "v3")
 
 # Byte-exact copies of the vendored literals (vendor/onediffrec/data.py).
 INSTRUCTION = (
@@ -86,6 +86,22 @@ USER_INPUT = {
             "Can you predict the next possible item that the user may expect?"),
 }
 PROMPT = "### User Input: \n{input}\n\n### Response:\n"
+
+# The grid runs (OneDiffRec >= a165f65; vendor/onediffrec_v3/scripts/ar/data.py
+# and evaluate_ar_joint.py) train AND test with the SFT wording, and that commit
+# dropped two spaces: none before "\n\n" after "the request." and none after
+# "### User Input:". Template "v3" is that prompt; it is a reproduction of what
+# the grid models saw, not a change to it, and `grid.inputs.check_prompts`
+# compares its ids with OneDiffRec's own dataset class row for row.
+INSTRUCTION_V3 = (
+    "Below is an instruction that describes a task, paired with an input that "
+    "provides further context. Write a response that appropriately completes "
+    "the request.\n\n### Instruction:\nCan you predict the next possible item "
+    "that the user may expect?\n\n")
+USER_INPUT["v3"] = USER_INPUT["sft"]
+PROMPT_V3 = "### User Input:\n{input}\n\n### Response:\n"
+INSTRUCTIONS = {"eval": INSTRUCTION, "sft": INSTRUCTION, "v3": INSTRUCTION_V3}
+PROMPTS = {"eval": PROMPT, "sft": PROMPT, "v3": PROMPT_V3}
 RESPONSE_HEADER = "### Response:\n"
 HISTORY_SEP = ", "
 TWO_ITEM_SEP = " ||| "
@@ -142,12 +158,18 @@ def csv_path(variant: SidVariant | str, task: str = "next-item",
 
 
 def load_examples(variant: SidVariant | str, task: str = "next-item",
-                  split: str = "test", path: Path | None = None) -> list[ArExample]:
+                  split: str = "test", path: Path | None = None,
+                  id_column: str | None = None) -> list[ArExample]:
     """Every row of one SFT CSV, in file order.
 
     `path` overrides the frozen location, e.g. to read a CSV exported from
     another cluster. Such a file should then pass `check_against_table`
     before anything uses it.
+
+    `id_column` takes each example id from that CSV column instead of the row
+    number. The grid's prepared cohorts carry `example_id`, a hash of (protocol,
+    horizon, user, event positions) shared with the DiffGRM cohort, which is
+    what pairs an AR row with the DiffGRM row for the same event.
     """
     import pandas as pd
 
@@ -173,8 +195,11 @@ def load_examples(variant: SidVariant | str, task: str = "next-item",
                              f"got {r.item_sid!r}")
         for s in (*hist_sids, *tgt_sids):
             parse_sid(s, v.n_codebook)
-        out.append(ArExample(f"{task}/{split}/{v.name}/{i}", task, split, v.name, i,
+        ex_id = getattr(r, id_column) if id_column else f"{task}/{split}/{v.name}/{i}"
+        out.append(ArExample(ex_id, task, split, v.name, i,
                              r.user_id, hist_ids, hist_sids, tgt_ids, tgt_sids))
+    if id_column and len({e.example_id for e in out}) != len(out):
+        raise ValueError(f"{path.name}: column {id_column!r} has duplicate ids")
     return out
 
 
@@ -220,13 +245,18 @@ def check_against_archive(examples: list[ArExample]) -> dict:
             "n_bad": len(bad)}
 
 
-def check_against_table(examples: list[ArExample], table: SidTable | None = None) -> dict:
-    """Every history and target SID string equals the frozen `.sem_ids` code."""
+def check_against_table(examples: list[ArExample], table: SidTable | None = None,
+                        item2id: dict[str, int] | None = None) -> dict:
+    """Every history and target SID string equals the table's code.
+
+    Defaults to the frozen `.sem_ids` and the frozen Industrial item ids; a grid
+    run passes its own table and its data root's item ids.
+    """
     if not examples:
         raise ValueError("no examples")
     v = SidVariant.parse(examples[0].variant)
     table = table or SidTable.load(v)
-    id2asin = {i: a for a, i in load_item2id(PRIMARY_CATEGORY).items()}
+    id2asin = {i: a for a, i in (item2id or load_item2id(PRIMARY_CATEGORY)).items()}
     n, bad, unknown = 0, [], 0
     for ex in examples:
         pairs = [*zip(ex.history_item_ids, ex.history_sids),
@@ -368,8 +398,10 @@ def encode(ex: ArExample, tokenizer, vocab, *, template: str,
     n = SidVariant.parse(ex.variant).n_codebook
     if vocab.variant.name != ex.variant:
         raise ValueError(f"vocab is for {vocab.variant.name}, example is {ex.variant}")
-    instr = _encode(tokenizer, INSTRUCTION, bos=True, eos=False)
-    prompt = _encode(tokenizer, PROMPT.format(input=user_input(ex, template)),
+    if template not in TEMPLATES:
+        raise ValueError(f"template must be one of {TEMPLATES}, got {template!r}")
+    instr = _encode(tokenizer, INSTRUCTIONS[template], bos=True, eos=False)
+    prompt = _encode(tokenizer, PROMPTS[template].format(input=user_input(ex, template)),
                      bos=False, eos=False)
     header = _encode(tokenizer, RESPONSE_HEADER, bos=False, eos=False)
     if prompt[-len(header):] != header:

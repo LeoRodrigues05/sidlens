@@ -18,7 +18,7 @@ def conditions(beams):
 
 
 def label(policy, order):
-    return policy if order is None else "fixed_" + "".join(str(x) for x in order)
+    return policy if order is None else f"{policy}_" + "".join(str(x) for x in order)
 
 
 def paired_effects(values, axes, *, n_boot=2000, seed=BOOTSTRAP_SEED):

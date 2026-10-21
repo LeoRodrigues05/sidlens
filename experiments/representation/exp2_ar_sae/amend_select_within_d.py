@@ -42,19 +42,23 @@ def within_d_auc(A, y, d, mask) -> np.ndarray:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a grid weight state (grid:<key>@<state>) instead of --cell")
     ap.add_argument("--sae-run", type=Path, required=True)
     ap.add_argument("--analysis", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
+    if (args.cell is None) == (args.ckpt is None):
+        ap.error("give exactly one of --cell or --ckpt")
+    ckpt = args.ckpt or CELLS[args.cell]
     for nm in ("sae_run", "analysis"):
-        if (getattr(args, nm) / f"cell-{args.cell:02d}").is_dir():          # a run group: take this cell
+        if args.cell is not None and (getattr(args, nm) / f"cell-{args.cell:02d}").is_dir():   # a run group
             setattr(args, nm, getattr(args, nm) / f"cell-{args.cell:02d}")
     args.out.mkdir(parents=True, exist_ok=True)
     if (args.out / "selection.json").exists():
         raise FileExistsError(f"{args.out} already holds a selection")
     base = json.loads((args.analysis / "selection.json").read_text())
-    if base["cell"] != CELLS[args.cell]:
+    if base["cell"] != ckpt:
         raise ValueError("analysis is for another cell")
     pos = pd.read_parquet(args.analysis / "positions.parquet")
     p1 = pos[pos.d >= 1].reset_index(drop=True)

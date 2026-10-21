@@ -28,10 +28,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
-from sidlens import paths                                                # noqa: E402
-from sidlens.data import ar_prompts as P                                 # noqa: E402
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.hooks.store import StoreReader                              # noqa: E402
-from sidlens.provenance import manifest as manifest_mod                  # noqa: E402
 from sidlens.sae.topk import SaeConfig, TopKSAE                          # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
@@ -47,16 +45,9 @@ def user_bucket(user: str, mod: int) -> int:
     return int(hashlib.sha256(f"{SEED}|{user}".encode()).hexdigest(), 16) % mod
 
 
-def open_store(job: str, ckpt: str, split: str) -> StoreReader:
-    st = StoreReader(paths.DERIVED / "ar_capture" / job / "capture" / "store", verify=True)
-    m = st.meta
-    want = manifest_mod.load()["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    if (m["model"], m["checkpoint_sha256"], m["split"], m["template"]) != (f"ar/{ckpt}", want, split, "eval"):
-        raise RuntimeError(f"store {job}: {m['model']} {m['split']} {m['template']} is not {ckpt} {split} eval")
-    missing = [f"model.layers.{L}" for L in LAYERS if f"model.layers.{L}" not in st.sites]
-    if missing:
-        raise KeyError(f"store {job} lacks {missing}")
-    return st
+def open_store(job, ckpt: str, split: str) -> StoreReader:
+    """A frozen capture job id or a grid capture directory, checked (`ar_inputs.capture_store`)."""
+    return AI.capture_store(job, ckpt, split, sites=[f"model.layers.{L}" for L in LAYERS])
 
 
 def role_groups(rows) -> dict[str, np.ndarray]:
@@ -73,14 +64,23 @@ def role_groups(rows) -> dict[str, np.ndarray]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a grid weight state (grid:<key>@<state>) instead of --cell")
+    ap.add_argument("--train-capture", type=Path, help="with --ckpt: ar_capture --out dir, train split")
+    ap.add_argument("--test-capture", type=Path, help="with --ckpt: ar_capture --out dir, test split")
     ap.add_argument("--epochs", type=int, default=None, help="pilot only")
     ap.add_argument("--layers", default=",".join(map(str, LAYERS)))
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--max-train-tokens", type=int, default=None, help="pilot only")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    ckpt = CELLS[args.cell]
+    if (args.cell is None) == (args.ckpt is None):
+        ap.error("give exactly one of --cell or --ckpt")
+    if args.ckpt and not (args.train_capture and args.test_capture):
+        ap.error("--ckpt needs --train-capture and --test-capture")
+    ckpt = args.ckpt or CELLS[args.cell]
+    train_at = args.train_capture or TRAIN_STORE[ckpt]
+    test_at = args.test_capture or TEST_STORE[ckpt]
     layers = tuple(int(x) for x in args.layers.split(","))
     args.out.mkdir(parents=True, exist_ok=True)
     if (args.out / "fidelity.json").exists():
@@ -91,9 +91,9 @@ def main(argv=None) -> int:
     t0 = time.time()
     log = lambda m: print(f"{time.strftime('%H:%M:%S')} {m}", flush=True)       # noqa: E731
 
-    tr, te = open_store(TRAIN_STORE[ckpt], ckpt, "train"), open_store(TEST_STORE[ckpt], ckpt, "test")
+    tr, te = open_store(train_at, ckpt, "train"), open_store(test_at, ckpt, "test")
     variant = tr.meta["variant"]
-    users = {e.example_id: e.user_id for e in P.load_examples(variant, "next-item", "train")}
+    users = {e.example_id: e.user_id for e in AI.examples(ckpt, "train")}
     tr_user = tr.rows.example_id.map(users)
     if tr_user.isna().any():
         raise ValueError("train store rows whose example is not in the train CSV")
@@ -105,8 +105,8 @@ def main(argv=None) -> int:
     ho_groups = {g: ho_pos[ix][ho_pos[ix] >= 0] for g, ix in tr_groups.items()}
     cfg = SaeConfig(d_in=int(tr.manifest["sites"][f"model.layers.{layers[0]}"]["width"]),
                     **{**CFG, **({"epochs": args.epochs} if args.epochs else {})})
-    inputs = {"checkpoint": f"ar/{ckpt}", "variant": variant, "train_store": TRAIN_STORE[ckpt],
-              "test_store": TEST_STORE[ckpt], "layers": layers, "config": cfg.__dict__,
+    inputs = {"checkpoint": f"ar/{ckpt}", "variant": variant, "train_store": str(train_at),
+              "test_store": str(test_at), "layers": layers, "config": cfg.__dict__,
               "n_train_tokens": int((~hold).sum()), "n_holdout_tokens": int(hold.sum()),
               "n_train_users": int(tr_user[~hold].nunique()), "n_holdout_users": int(tr_user[hold].nunique()),
               "n_test_tokens": len(te.rows), "test_role_counts": {k: int(len(v)) for k, v in groups.items()},

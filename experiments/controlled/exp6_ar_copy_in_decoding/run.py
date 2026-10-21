@@ -40,7 +40,7 @@ from sidlens.data import ar_prompts as P                                 # noqa:
 from sidlens.data.sids import SidTable                                   # noqa: E402
 from sidlens.interventions.generation import generation_knockout         # noqa: E402
 from sidlens.models import ar                                            # noqa: E402
-from sidlens.provenance import hashing, manifest as manifest_mod         # noqa: E402
+from sidlens.provenance import hashing                                   # noqa: E402
 
 CELLS = ("next-item_best", "oneoff_rqvae4cb128")
 CONDITIONS = ("B", "C_later", "C_all", "N_later", "B_plain", "C_all_plain")
@@ -51,12 +51,8 @@ SEED = 42                        # evaluate.py's default; set at the start of ev
 
 
 def checkpoint_sha(ckpt: str) -> str:
-    man = manifest_mod.load()
-    want = man["data"][f"ckpt/ar/{ckpt}"]["files"]["model.safetensors"]["sha256"]
-    got = hashing.HashCache().get(paths.FROZEN_CKPT / "ar" / ckpt / "model.safetensors")
-    if got != want:
-        raise RuntimeError(f"{ckpt}/model.safetensors sha256 {got[:12]} != manifest {want[:12]}")
-    return got
+    """Weights hash, checked against the freeze manifest or the retrain registry."""
+    return ar.checkpoint_sha(ckpt)
 
 
 def vendored_processor():
@@ -167,7 +163,8 @@ class Plan:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
-    ap.add_argument("--ckpt", choices=CELLS)
+    ap.add_argument("--ckpt", choices=ar.known_checkpoints(),
+                    help="a frozen checkpoint or a registered retrain (retrain/<run>/<variant>)")
     ap.add_argument("--conditions", default=",".join(CONDITIONS))
     ap.add_argument("--limit", type=int, default=None, help="first N rows of shard 0 (pilot)")
     ap.add_argument("--check-plain", action="store_true", help="V2: also run unhooked generate()")
@@ -192,7 +189,7 @@ def main(argv=None) -> int:
         logf.flush()
 
     from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig, LogitsProcessorList
-    ckpt_dir = paths.FROZEN_CKPT / "ar" / ckpt
+    ckpt_dir = ar.checkpoint_dir(ckpt)
     vocab = ar.load_vocab(ckpt)
     n = vocab.variant.n_codebook
     tok = AutoTokenizer.from_pretrained(str(ckpt_dir), local_files_only=True)
@@ -209,8 +206,18 @@ def main(argv=None) -> int:
     if args.limit:
         plan_batches = [(sh, b) for sh, b in plan_batches if b[-1] < args.limit]
     sha = checkpoint_sha(ckpt)
-    arch = P.archive_path(vocab.variant, "next-item")
+    if ar.is_retrained(ckpt):
+        # A retrained model's reference is its own archived-style evaluation (the same
+        # evaluate.py, 4 shards, batches of 8, seed 42 per shard), not the deleted model's lists.
+        entry = ar.retrain_entry(ckpt)
+        arch = paths.WORK / entry["predictions"]
+        if hashing.sha256_file(arch) != entry["predictions_sha256"]:
+            raise RuntimeError(f"{arch} changed after {ckpt} was registered")
+    else:
+        arch = P.archive_path(vocab.variant, "next-item")
     archived = json.loads(arch.read_text())
+    if len(archived) != len(examples):
+        raise RuntimeError(f"{arch}: {len(archived)} lists for {len(examples)} test rows")
     inputs = {"checkpoint": f"ar/{ckpt}", "checkpoint_sha256": sha, "variant": vocab.variant.name,
               "n_digits": n, "split": "test", "template": "eval", "n_rows": len(examples),
               "limited": args.limit, "n_batches": len(plan_batches), "conditions": conditions,

@@ -41,11 +41,21 @@ class ItemMeta:
 
 
 @lru_cache(maxsize=4)
-def load(category: str) -> dict[str, ItemMeta]:
-    """ASIN -> ItemMeta for every item in the frozen catalogue."""
-    raw = json.loads(
-        (paths.FROZEN_DATA / "item_meta" / f"{category}.item.json").read_text())
-    item2id = load_item2id(category)
+def load(category: str, root: str | None = None) -> dict[str, ItemMeta]:
+    """ASIN -> ItemMeta for every item in the frozen catalogue, or in a OneDiffRec
+    data root's `<root>/<category>.{item.json,item2id}` (a grid run's catalog)."""
+    if root is None:
+        raw = json.loads(
+            (paths.FROZEN_DATA / "item_meta" / f"{category}.item.json").read_text())
+        item2id = load_item2id(category)
+    else:
+        from pathlib import Path
+        raw = json.loads((Path(root) / f"{category}.item.json").read_text())
+        item2id = {}
+        for line in (Path(root) / f"{category}.item2id").read_text().splitlines():
+            if line.strip():
+                asin, idx = line.split("\t")
+                item2id[asin] = int(idx)
     out: dict[str, ItemMeta] = {}
     for asin, iid in item2id.items():
         rec = raw.get(str(iid))

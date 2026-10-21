@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import html
 import json
 import re
 import sys
@@ -74,6 +75,15 @@ from sidlens.provenance import hashing                       # noqa: E402
 
 SOURCE_URL = ("https://mcauleylab.ucsd.edu/public_datasets/data/amazon_v2/"
               "metaFiles2/meta_{category}.json.gz")
+
+# The frozen catalogue name and the 2018 release's file name differ for Office:
+# the release calls it Office_Products. Mapping it here, rather than renaming the
+# download, keeps the manifest's URL the one the bytes actually came from.
+RELEASE_NAME = {"Office": "Office_Products"}
+
+
+def release_name(category: str) -> str:
+    return RELEASE_NAME.get(category, category)
 
 # Level 0 of every breadcrumb is the category name itself and carries zero
 # information. Kept out of the emitted fields rather than emitted and ignored,
@@ -121,13 +131,13 @@ def parse_rank(raw) -> tuple[int | None, str | None]:
 
 
 def build(category: str, write: bool = True) -> dict:
-    src = paths.EXTERNAL / "amazon2018" / f"meta_{category}.json.gz"
+    src = paths.EXTERNAL / "amazon2018" / f"meta_{release_name(category)}.json.gz"
     if not src.exists():
         raise SystemExit(
             f"missing {src}\n"
             f"download it first:\n"
             f"  mkdir -p {src.parent}\n"
-            f"  curl -sSL -o {src} {SOURCE_URL.format(category=category)}")
+            f"  curl -sSL -o {src} {SOURCE_URL.format(category=release_name(category))}")
 
     item2id = load_item2id(category)
     wanted = set(item2id)
@@ -156,13 +166,18 @@ def build(category: str, write: bool = True) -> dict:
 
     out: dict[str, dict] = {}
     for asin, rec in found.items():
-        crumb = [c for c in (rec.get("category") or []) if isinstance(c, str) and c.strip()]
+        # The release HTML-escapes some breadcrumbs and store names but not
+        # others: 1,104 Office items say "Office &amp; School Supplies" where the
+        # rest say "Office & School Supplies", which would split one class in
+        # two. Industrial has no escaped category value, so this is a no-op there.
+        crumb = [html.unescape(c).strip() for c in (rec.get("category") or [])
+                 if isinstance(c, str) and c.strip()]
         crumb = crumb[BREADCRUMB_SKIP:]
         price = parse_price(rec.get("price"))
         rank, rank_store = parse_rank(rec.get("rank"))
         row = {
             "item_id": item2id[asin],
-            "main_cat": (rec.get("main_cat") or "").strip(),
+            "main_cat": html.unescape(rec.get("main_cat") or "").strip(),
             "cat_depth": len(crumb),
             "cat_leaf": crumb[-1] if crumb else "",
             "brand_ext": (rec.get("brand") or "").strip(),
@@ -218,7 +233,7 @@ def build(category: str, write: bool = True) -> dict:
         "category": category,
         "snapshot": (paths.MANIFESTS / "CURRENT").read_text().strip(),
         "source": {
-            "url": SOURCE_URL.format(category=category),
+            "url": SOURCE_URL.format(category=release_name(category)),
             "release": "Amazon Review Data (2018), Ni/Li/McAuley -- metaFiles2",
             "path": str(src),
             "sha256": hashing.sha256_file(src),

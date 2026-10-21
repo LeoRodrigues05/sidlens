@@ -20,10 +20,13 @@ Traps, each with the guard that closes it
 4. **Out-of-range indices.** Advanced indexing past the batch or sequence
    raises on GPU only asynchronously, far from the cause. Bounds are checked
    in the hook before the write.
-5. **Tuple outputs.** Some transformers versions return `(hidden, ...)` from a
-   decoder layer and others a bare tensor (4.57 does the latter). The hook
+5. **Tuple and dict outputs.** Some transformers versions return `(hidden, ...)`
+   from a decoder layer and others a bare tensor (4.57 does the latter);
+   DiffGRM's `DecoderBlock` returns `{'hidden_states': ..., ...}`. The hook
    finds the hidden state the same way `hooks.capture` does and rebuilds the
-   container, so an upgrade cannot turn the patch into a no-op.
+   same container, so an upgrade cannot turn the patch into a no-op. A dict
+   rebuilt as a list of its keys would not be a no-op either: the vendor's
+   next line indexes it by name and raises.
 6. **In-place mutation of a captured source.** The hook writes into a clone of
    the block output, never into the tensor another hook or cache holds.
 
@@ -120,6 +123,8 @@ def patch_residual(model, patches: list[Patch], expect_calls: int = 1) -> Iterat
             new[rows.to(t.device), pos.to(t.device)] = vals.to(device=t.device, dtype=t.dtype)
             if idx is None:
                 return new
+            if isinstance(out, dict):
+                return {**out, list(out)[idx]: new}
             items = list(out)
             items[idx] = new
             return type(out)(items) if isinstance(out, tuple) else items

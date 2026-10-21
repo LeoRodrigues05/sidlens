@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,-apple-system,"Segoe UI",sans-serif;background:#fafafa}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>SidLens Retrain and Layer Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (max 1040px) under a slim sticky section bar; each chart spans the column with its data table folded beneath it. Tokens follow the SidLens interventions report (same quantizer hues, same faces). */
+:root {
+  --page: #f4f5f7; --surface: #fcfcfb; --surface-2: #eef0f3;
+  --ink: #101318; --ink-2: #474d57; --muted: #6c727b;
+  --grid: #e3e5e9; --axis: #c3c7cd; --rule: #dcdfe4;
+  --s-rqk: #2a78d6; --s-rqvae: #eb6834; --s-mq: #1baf7a; --s-ctx: #9ba1aa;
+  --good: #0ca30c; --good-ink: #006300; --crit: #d03b3b; --crit-ink: #a52626;
+  --part: #eda100; --part-ink: #7a5b00; --wait: #2a78d6; --wait-ink: #1f5aa3;
+  --band-op: 0.14;
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0e0f11; --surface: #1a1a19; --surface-2: #232427;
+    --ink: #f2f3f5; --ink-2: #c1c5cc; --muted: #959aa3;
+    --grid: #2c2d2f; --axis: #45474b; --rule: #2e3034;
+    --s-rqk: #3987e5; --s-rqvae: #d95926; --s-mq: #199e70; --s-ctx: #6e747d;
+    --good: #3ec43e; --good-ink: #5fd35f; --crit: #e66767; --crit-ink: #ef8a8a;
+    --part: #c98500; --part-ink: #e0b440; --wait: #3987e5; --wait-ink: #7fb2f0;
+    --band-op: 0.22; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0e0f11; --surface: #1a1a19; --surface-2: #232427;
+  --ink: #f2f3f5; --ink-2: #c1c5cc; --muted: #959aa3;
+  --grid: #2c2d2f; --axis: #45474b; --rule: #2e3034;
+  --s-rqk: #3987e5; --s-rqvae: #d95926; --s-mq: #199e70; --s-ctx: #6e747d;
+  --good: #3ec43e; --good-ink: #5fd35f; --crit: #e66767; --crit-ink: #ef8a8a;
+  --part: #c98500; --part-ink: #e0b440; --wait: #3987e5; --wait-ink: #7fb2f0;
+  --band-op: 0.22; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 0 64px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(26px, 4.2vw, 36px); font-weight: 600; letter-spacing: -0.015em; }
+h2 { font-size: 23px; font-weight: 600; letter-spacing: -0.01em; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--wait-ink); }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+.num { font-variant-numeric: tabular-nums; }
+.eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* header */
+header.top { padding-block: 40px 22px; display: grid; gap: 12px; }
+header.top .meta { color: var(--ink-2); max-width: 70ch; }
+
+/* sticky section bar */
+nav.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--page);
+  border-bottom: 1px solid var(--rule); }
+nav.bar .in { max-width: 1040px; margin: 0 auto; padding-inline: 20px; display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; }
+nav.bar a { color: var(--ink-2); text-decoration: none; font-size: 13.5px; padding-block: 10px; white-space: nowrap; border-bottom: 2px solid transparent; }
+nav.bar a:hover, nav.bar a:focus-visible { color: var(--ink); border-bottom-color: var(--axis); outline: none; }
+
+/* status strip */
+.status { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-block: 22px 8px; }
+.stat { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: grid; gap: 6px; min-width: 0; }
+.stat .k { font-weight: 600; }
+.stat .v { color: var(--ink-2); font-size: 13.5px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 2px 8px; border-radius: 999px; width: fit-content; font-weight: 500; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip.good { color: var(--good-ink); background: color-mix(in srgb, var(--good) 13%, transparent); }
+.chip.crit { color: var(--crit-ink); background: color-mix(in srgb, var(--crit) 13%, transparent); }
+.chip.part { color: var(--part-ink); background: color-mix(in srgb, var(--part) 16%, transparent); }
+.chip.wait { color: var(--wait-ink); background: color-mix(in srgb, var(--wait) 13%, transparent); }
+.chip.wait::before { background: transparent; border: 1.5px solid currentColor; }
+
+/* sections */
+section { padding-block: 44px 8px; border-top: 1px solid var(--rule); margin-top: 36px; display: grid; gap: 18px; scroll-margin-top: 56px; }
+section > header { display: grid; gap: 8px; }
+.lede { color: var(--ink-2); }
+ul.find { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: 74ch; }
+ul.find li::marker { color: var(--muted); }
+ul.find b { font-weight: 600; }
+.note { border-left: 3px solid var(--part); padding: 2px 0 2px 12px; color: var(--ink-2); max-width: 74ch; }
+
+/* figures */
+figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px 18px 12px; display: grid; gap: 10px; min-width: 0; }
+figure .cap { display: grid; gap: 4px; }
+figure .cap h3 + p { color: var(--ink-2); font-size: 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.key { display: inline-block; flex: none; }
+.key.line { width: 18px; height: 0; border-top: 2px solid var(--c); }
+.key.dash { width: 18px; height: 0; border-top: 2px dashed var(--c); }
+.key.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.key.ring { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--c); }
+.key.rect { width: 11px; height: 11px; border-radius: 2px; background: var(--c); }
+.key.hollow { width: 11px; height: 11px; border-radius: 2px; border: 1.5px solid var(--c); background: var(--surface-2); }
+.key.band { width: 18px; height: 10px; background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.viz { position: relative; width: 100%; min-width: 0; }
+.viz svg { display: block; width: 100%; height: auto; overflow: visible; }
+.viz svg text { font-family: var(--sans); fill: var(--muted); font-size: 11.5px; }
+.viz svg text.lab { fill: var(--ink-2); font-size: 12px; }
+.viz svg text.title { fill: var(--ink); font-size: 12.5px; font-weight: 600; }
+.viz .hit { fill: transparent; cursor: crosshair; }
+.viz .hit:focus-visible { outline: none; stroke: var(--axis); stroke-width: 1; }
+.viz .row-hit { fill: transparent; }
+.viz .row-hit.on { fill: color-mix(in srgb, var(--ink) 5%, transparent); }
+.small-multiples { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px 18px; }
+.tip { position: absolute; pointer-events: none; z-index: 3; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12); padding: 8px 10px; font-size: 12.5px; min-width: 150px; max-width: 280px; display: grid; gap: 3px; }
+.tip .h { color: var(--muted); font-size: 11.5px; font-family: var(--mono); }
+.tip .r { display: flex; align-items: center; gap: 8px; }
+.tip .r b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.tip .r span.n { color: var(--ink-2); }
+
+/* tables */
+details.tbl summary { cursor: pointer; color: var(--ink-2); font-size: 13px; width: fit-content; }
+details.tbl summary:focus-visible { outline: 2px solid var(--wait); outline-offset: 2px; border-radius: 3px; }
+.tablewrap { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; font-size: 13px; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-weight: 600; color: var(--ink-2); font-size: 12px; }
+td.r, th.r { text-align: right; }
+table.verdicts td { white-space: normal; vertical-align: top; min-width: 9em; }
+table.verdicts td:first-child { font-family: var(--mono); font-size: 12px; min-width: 2.5em; }
+table.verdicts td.exp { min-width: 15em; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+table.verdicts td.how { color: var(--ink-2); min-width: 12em; }
+dl.log.terms { grid-template-columns: 9.5em minmax(0, 1fr); gap: 8px 16px; }
+dl.log.terms dt { font-family: var(--sans); font-size: 13.5px; font-weight: 600; color: var(--ink); padding-top: 1px; }
+.viz-col { display: grid; gap: 8px; min-width: 0; }
+/* recap + plan */
+.sec-tag { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+ol.ranked { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: rank; }
+ol.ranked li { counter-increment: rank; display: grid; grid-template-columns: 2em minmax(0, 1fr); gap: 4px 12px; padding-block: 14px; border-bottom: 1px solid var(--rule); }
+ol.ranked li:last-child { border-bottom: 0; }
+ol.ranked li::before { content: counter(rank); font-family: var(--mono); font-size: 13px; color: var(--muted); padding-top: 3px; grid-column: 1; grid-row: 1; }
+ol.ranked li > * { grid-column: 2; min-width: 0; }
+ol.ranked .t { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+ol.ranked .t a { color: var(--ink); font-weight: 600; text-decoration: none; font-size: 16px; }
+ol.ranked .t a:hover, ol.ranked .t a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+ol.ranked p { color: var(--ink-2); font-size: 14.5px; max-width: 76ch; }
+ol.ranked p.caveat { color: var(--muted); font-size: 13.5px; }
+.recap-group { display: grid; gap: 10px; }
+.recap-group > h3 { font-size: 15px; color: var(--ink); padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+dl.log { margin: 0; display: grid; grid-template-columns: 5.2em minmax(0, 1fr); gap: 12px 16px; }
+dl.log dt { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 3px; font-variant-numeric: tabular-nums; }
+dl.log dd { margin: 0; display: grid; gap: 3px; min-width: 0; max-width: 78ch; }
+dl.log dd .name { font-weight: 600; }
+dl.log dd .name span { font-weight: 400; color: var(--muted); font-family: var(--mono); font-size: 12px; margin-left: 6px; }
+dl.log dd p { color: var(--ink-2); font-size: 14px; }
+.plan { display: grid; gap: 12px; }
+.plan-item { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 4px 14px; align-items: start; padding-block: 12px; border-bottom: 1px solid var(--rule); }
+.plan-item:last-child { border-bottom: 0; }
+.plan-item .chip { margin-top: 2px; }
+.plan-item h3 { font-size: 15px; }
+.plan-item p { color: var(--ink-2); font-size: 14px; max-width: 76ch; }
+.plan-item .cost { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.deadline { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; color: var(--ink-2); }
+.deadline b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { dl.log, dl.log.terms { grid-template-columns: 1fr; gap: 2px 0; } dl.log dd { margin-bottom: 10px; } .plan-item { grid-template-columns: 1fr; } }
+footer.src { margin-top: 40px; color: var(--muted); font-size: 12.5px; display: grid; gap: 6px; }
+footer.src code { color: var(--ink-2); }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; } figure { padding: 14px 12px 10px; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<nav class="bar" aria-label="Sections"><div class="in">
+  <a href="#recap">Last week</a><a href="#week">This week</a><a href="#layers">Layer map</a><a href="#retrain">Retrained models</a><a href="#zcr">Collision-free maps</a><a href="#grid">Copy grid</a><a href="#plan">Plan</a><a href="#sources">Sources</a>
+</div></nav>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">SidLens · weekly results review · week of 5 Oct 2026 · <span id="gen"></span></div>
+  <h1>Retrained recommenders and what each layer holds</h1>
+  <p class="meta">Industrial_and_Scientific, Qwen2.5-1.5B next-item recommenders. Test split (3,681 events, 1,606 users) unless stated. Intervals are 95% paired user-bootstrap intervals (2,000 draws); they exclude training-seed variance.</p>
+  <div class="status" id="status"></div>
+</header>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="recap">
+  <header>
+    <div class="eyebrow">recap · 28 Sep – 4 Oct</div>
+    <h2>Last week: copying helps mostly where the history already holds the answer</h2>
+    <p class="lede">The week started from three AR results of 27 Sep. Replacing the most recent history item costs the golden first digit 0.57 / 0.51 nats (RQ-KMeans 3×128 / RQ-VAE 4×128). A history item that already matches the target's first d digits is copied at digit d (1.35 / 1.06 nats). A single attention edge in layers 14–27 carries that copy (0.40 / 0.36 nats). Last week asked whether copying helps real recommendations, how it is computed, and what in the data it exploits. Pairs of numbers below are RQ-KMeans 3×128 / RQ-VAE 4×128.</p>
+  </header>
+
+  <div class="recap-group"><h3>Does copying help the recommendations?</h3>
+    <dl class="log">
+      <dt>28 Sep</dt><dd><div class="name">Copy block inside beam search<span>controlled exp6</span></div>
+        <p>Blocking copy reads in layers 14–27 lowers exact-SID HR@10 by 5.7 / 3.3 points: 27.3 / 10.1 when the true next item's SID is already in the history, and 2.1 / 3.0 otherwise. A matched control block moves it by −0.03 / −0.11. With plain beam search the drop is 4.0 / 3.2 points.</p></dd>
+      <dt>28 Sep</dt><dd><div class="name">Audit of the archived AR decoder</div>
+        <p>The archived beams sampled (temperature 0.7, top-k 20, top-p 0.8, repetition penalty 1.1), and 18.9% / 15.0% of list entries were not catalogue SIDs. The surviving RQ-VAE model reproduces none of the 3,681 archived RQ-VAE lists, so it is not the sweep's model.</p></dd>
+      <dt>3 Oct</dt><dd><div class="name">Collision credit in copying<span>retro exp7</span></div>
+        <p>Scored per item, the copy benefit shrinks. For RQ-KMeans 3×128, targets that share a history item's SID but are a different item (11% of rows) supply 56% of the HR@10 loss, and only 28% of the HR@1 benefit survives. For RQ-VAE, near-duplicate variants supply 80% of the loss. On truly new targets the item-level change is −0.2 / −0.1 points.</p></dd>
+      <dt>4 Oct</dt><dd><div class="name">Copied reviews<span>exploratory, no protocol</span></div>
+        <p>About 15% of targets are one review that Amazon copied onto a variant item already in the history. They supply 33 / 42% of SID HR@10 hits. Without them and exact duplicates, HR@10 falls from 24.0% to 16.4% and from 14.4% to 7.2%.</p></dd>
+    </dl></div>
+
+  <div class="recap-group"><h3>How copying is computed</h3>
+    <dl class="log">
+      <dt>28 Sep</dt><dd><div class="name">Logit lens and probes<span>representation exp1</span></div>
+        <p>The final first digit equals the most recent item's first digit in 64% / 53% of rows. The copy preference appears at layers 20–23 (RQ-KMeans) and 11 and 20 (RQ-VAE). A linear probe never reads the true next item's first digit better than the rule “use the most recent item's first digit”.</p></dd>
+      <dt>28 Sep</dt><dd><div class="name">DiffGRM history use and copy route<span>controlled exp7, exp8</span></div>
+        <p>DiffGRM behaves like the AR model: replacing the most recent item costs 0.56 / 0.48 nats, and prefix-matched copying 0.35 / 0.96. The copy runs through the encoder. The decoder's direct read of the item carries nothing alone. Blocking both routes removes about two thirds of the effect.</p></dd>
+      <dt>30 Sep</dt><dd><div class="name">Sparse autoencoders on AR residuals<span>representation exp2</span></div>
+        <p>Copy features at the first-digit readout are causal from layer 20: ablating them costs 0.10 nats at L20 and 0.21 / 0.36 at L24. Sharp prefix-match features (AUC up to 0.97) have no causal effect at the readout. No target content beyond the history.</p></dd>
+      <dt>30 Sep</dt><dd><div class="name">Order vs time<span>controlled exp9</span></div>
+        <p>RQ-KMeans follows list position, not item or time: swapping the two most recent items while keeping their dates flips 50% of first-digit decisions and 42% of top-1 SIDs, with HR@10 unchanged. RQ-VAE is only weakly positional.</p></dd>
+      <dt>3 Oct</dt><dd><div class="name">Last digit of a prefix-matching item<span>controlled exp10</span></div>
+        <p>RQ-KMeans copies the matching item's last digit, which costs sibling targets. RQ-VAE does the opposite in sibling rows: blocking the edge raises top-1 = that item by about 12 points and lowers top-1 = the sibling target by about 10. These are secondary measures: RQ-VAE's declared primary (pooled, control-subtracted) points the same way, but its interval includes 0.</p></dd>
+    </dl></div>
+
+  <div class="recap-group"><h3>What the data and maps supply</h3>
+    <dl class="log">
+      <dt>30 Sep</dt><dd><div class="name">Time structure<span>retro exp6</span></div>
+        <p>In this data “recent” means the same day: once an item's age is known, its position adds almost nothing. Same-day rows carry 87 / 88% of exp6's copy benefit. Duplicate review records are 2.7% of test rows but 11 / 17% of HR@10 hits.</p></dd>
+      <dt>3 Oct</dt><dd><div class="name">Why items share a SID<span>structure exp3</span></div>
+        <p>Each quantizer family collides for a different reason. RQ-VAE's near-zero rate comes from upstream's last-digit de-duplication loop. Near-duplicate variants set the floor. Shallow RQ-KMeans collisions come from a near-origin hub code, and MQ digits are redundant. 44.8% of items share a SID at RQ-KMeans 3×128.</p></dd>
+      <dt>4 Oct</dt><dd><div class="name">Runs started</div>
+        <p>The layer-map captures and census (finished 4 Oct, analysed this week) and the 18-map AR retrain (calibration cell accepted 4 Oct; the other maps finished 5 Oct).</p></dd>
+    </dl></div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="week">
+  <header>
+    <div class="eyebrow">this week · 5–6 Oct</div>
+    <h2>This week's results, strongest first</h2>
+    <p class="lede">The layer-map runs finished on Sunday 4 Oct; their analysis and everything else below is from 5–6 Oct. Each result says whether it is ready to show.</p>
+  </header>
+  <ol class="ranked" id="findings"></ol>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="layers">
+  <header>
+    <div class="sec-tag"><span class="chip good">show · strongest new result</span><span class="eyebrow">representation / exp3 · information map</span></div>
+    <h2>Repeat recommendations settle around layer 17, others around 23</h2>
+    <p class="lede">For the two original checkpoints we let each model write its own recommendation for every test row and recorded every layer while it did. On these recordings we trained readers (a tuned lens, whole-SID decoders and sparse autoencoders) and asked what each layer holds. All of it is observational: readable does not mean used.</p>
+  </header>
+
+  <figure>
+    <div class="cap"><h3>Terms used in this section</h3></div>
+    <dl class="log terms">
+      <dt>recommendation</dt><dd><p>The SID the model itself writes for the row, choosing the best catalogue SID one digit at a time. It equals the true next item in 11% / 6% of rows (RQ-KMeans / RQ-VAE).</p></dd>
+      <dt>repeat</dt><dd><p>The recommendation is the same SID as the last item in the user's history. This happens in 42% / 16% of rows.</p></dd>
+      <dt>true next item</dt><dd><p>The item the user actually reviewed next: the test target.</p></dd>
+      <dt>answer start</dt><dd><p>The last prompt token, the “:\n” of “### Response:\n”. The model chooses the recommendation's first digit here.</p></dd>
+      <dt>logit lens</dt><dd><p>Apply the model's own output head to an earlier layer, unchanged: “what would the model say if it stopped here?”</p></dd>
+      <dt>tuned lens</dt><dd><p>The same, after a small linear map learned for that layer to match the final output. It can read information the output head cannot use yet.</p></dd>
+    </dl>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>Six predictions written before the run</h3></div>
+    <div class="tablewrap"><table class="verdicts">
+      <thead><tr><th></th><th>Prediction</th><th>How we measured it</th><th>RQ-KMeans 3×128</th><th>RQ-VAE 4×128</th></tr></thead>
+      <tbody>
+        <tr><td>E1</td><td class="exp">Feature types change with depth. At history tokens, features for the token itself and its item dominate early, and features for the previous item peak in the middle layers. At the answer start, features for the most recent item or for the recommendation become more common after layer 18.</td>
+          <td class="how">Label each autoencoder feature by the variable it matches best, then count the share of each label per layer.</td>
+          <td><span class="chip part">Partly</span><br>Token features dominate history tokens (86–98% at layer 0). Previous-item features keep growing to the last layer instead of peaking. At the answer start, features for the most recent item or the recommendation grow from 40% (layer 18) to 63% (layer 24).</td>
+          <td><span class="chip part">Partly</span><br>Same at history tokens. At the answer start that share stays at 20–23% from layer 18 to 24.</td></tr>
+        <tr><td>E2</td><td class="exp">Some features track the recommendation even when it is not a repeat. They appear at every layer from 20 on, and are rare before layer 16 (at most 1% of features).</td>
+          <td class="how">Re-test each feature that tracks the recommendation on only the rows where its digit differs from the most recent item's digit.</td>
+          <td><span class="chip crit">Fails</span><br>Found at every layer from 20 (7–57 features). But at layers 4–14 they are 1.6–6.9% of features, not at most 1% (1–4 features each).</td>
+          <td><span class="chip crit">Fails</span><br>7–31 features at layers 20–27; 1.5–5.6% of features at layers 6–14.</td></tr>
+        <tr><td>E3</td><td class="exp">With the tuned lens, the full recommendation is readable in under 20% of rows before layer 16, and in at least 80% by layer 26.</td>
+          <td class="how">Share of rows where the tuned lens's top choice at every digit equals the recommendation.</td>
+          <td><span class="chip crit">Fails early</span><br>43% at layer 10 and 54% at layer 16, earlier than predicted; 88% at layer 26.</td>
+          <td><span class="chip crit">Fails early</span><br>28% at layer 10 and 36% at layer 16; 83% at layer 26.</td></tr>
+        <tr><td>E4</td><td class="exp">At layer 26, a decoder reading the answer start recovers the full recommendation more often than the rule “recommend the most recent item”.</td>
+          <td class="how">Exact-SID accuracy of the decoder, against the rule.</td>
+          <td><span class="chip good">Holds</span><br>73% vs 43%; 67% on recommendations that are not repeats. This does not show planning ahead: the decoder already scores 62% at layer 0.</td>
+          <td><span class="chip good">Holds</span><br>67% vs 16%; 66% on non-repeats. Same caveat (49% at layer 0).</td></tr>
+        <tr><td>E5</td><td class="exp">A decoder reading the answer start recovers the true next item at most 2 points better than the rule “it is the most recent item”.</td>
+          <td class="how">Best layer's exact-SID accuracy minus the rule's.</td>
+          <td><span class="chip part">At the limit</span><br>11.6% vs 9.5% at layer 12: +2.1 points.</td>
+          <td><span class="chip crit">Fails</span><br>7.8% vs 4.5% at layer 24: +3.3 points.</td></tr>
+        <tr><td>E6</td><td class="exp">Each history item's full SID is readable from its last token by layer 4, and the item before it is readable in the middle layers.</td>
+          <td class="how">Exact-SID accuracy of decoders at history tokens.</td>
+          <td><span class="chip good">Holds</span><br>99.9% from layer 2. The previous item is read best at layer 14 (79%; a decoder with no input: 0.3%).</td>
+          <td><span class="chip good">Holds</span><br>99.5% at layer 2. The previous item is read best at layer 12 (63%; with no input: 2.5%).</td></tr>
+      </tbody></table></div>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>When the whole recommendation becomes readable</h3>
+      <p>Share of rows where the lens's top choice at every digit equals the model's recommendation. The logit lens applies the model's own output head to each layer as it is. The tuned lens first passes the layer through a small linear map learned for that layer, so it also reads information the output head cannot use yet.</p></div>
+    <div class="legend" id="lg-lens"></div>
+    <div class="viz" id="v-lens"></div>
+    <details class="tbl"><summary>Table: whole-recommendation agreement by layer</summary><div class="tablewrap" id="t-lens"></div></details>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>Repeat recommendations settle earlier</h3>
+      <p>For each row, the first layer from which the tuned lens gives the full recommendation at every later layer. Dot = median, bar = middle half of rows. Rows are split by whether the recommendation repeats the most recent item, and by whether the true next item is already in the history.</p></div>
+    <div class="legend" id="lg-d4"></div>
+    <div class="viz" id="v-d4"></div>
+    <details class="tbl"><summary>Table: first stable layer</summary><div class="tablewrap" id="t-d4"></div></details>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>What each position holds, layer by layer</h3>
+      <p>Exact-SID accuracy of a small decoder trained on each layer. Dotted lines are simple rules: “recommend the most recent item” in the recommendation and true-next-item panels, and “most common SID given digit 1” in the first-token panel. The grey line is a decoder that ignores its input. In the recommendation panel, the thin dashed line is accuracy on recommendations that are not repeats.</p></div>
+    <div class="legend" id="lg-dec"></div>
+    <div class="small-multiples" id="v-dec"></div>
+    <details class="tbl"><summary>Table: decoder accuracy at layers 0, 10, 20, 26</summary><div class="tablewrap" id="t-dec"></div></details>
+  </figure>
+
+  <figure>
+    <div class="cap"><h3>Features at the answer start</h3>
+      <p>Left: share of autoencoder features at the answer start that track the most recent item, or the model's recommendation. Right: how many features track the recommendation, and how many of those still track it when the recommendation is not a repeat.</p></div>
+    <div class="two">
+      <div class="viz-col"><div class="legend" id="lg-cen1"></div><div class="viz" id="v-cen1"></div></div>
+      <div class="viz-col"><div class="legend" id="lg-cen2"></div><div class="viz" id="v-cen2"></div></div>
+    </div>
+    <details class="tbl"><summary>Table: features at the answer start by layer</summary><div class="tablewrap" id="t-cen"></div></details>
+  </figure>
+
+  <ul class="find">
+    <li><b>Planning ahead is not shown.</b> The recommendation decoder already scores 62% / 49% at layer 0, after one attention pass over the history. The decoder works out much of the recommendation from history information itself, so a high score at layer 26 does not show that the model has planned later digits at the answer start.</li>
+    <li><b>Better than the rule is not the same as beyond the history.</b> A decoder can beat “recommend the most recent item” by, for example, recommending the item before it. The SAE study (representation exp2) found no information about the true next item beyond what the history gives.</li>
+    <li><b>Greedy recommendations.</b> The recommendation here is the model's greedy answer. It equals the true next item in <span id="gg"></span> of rows and the plain beam search's top-1 in <span id="gb"></span>.</li>
+  </ul>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="retrain">
+  <header>
+    <div class="sec-tag"><span class="chip good">show · methods result</span><span class="eyebrow">substrate / exp1 · acceptance</span></div>
+    <h2>12 of 18 retrained models match the deleted ones</h2>
+    <p class="lede">The August sweep deleted the weights of 26 of its 28 AR runs after scoring them. We retrained the 18 next-item models of the width-128 and width-512 grid with the recorded recipe and compared each with the deleted model's archived ranked lists on the same test rows. A model is accepted when Hit@10 moves by at most 1.5 points and NDCG@10 by at most 1.0 point. Only accepted models enter any later result.</p>
+  </header>
+  <figure>
+    <div class="cap"><h3>Change in Hit@10, retrained minus archived</h3>
+      <p>The shaded band is the acceptance limit of ±1.5 points. Rows marked “failed” miss on Hit@10, NDCG@10, or both.</p></div>
+    <div class="legend" id="lg-acc"></div>
+    <div class="viz" id="v-acc"></div>
+    <details class="tbl"><summary>Table: all 18 maps</summary><div class="tablewrap" id="t-acc"></div></details>
+  </figure>
+  <div class="two">
+    <figure>
+      <div class="cap"><h3>The map ranking is preserved</h3><p>Hit@10 of each retrained model against its archived model. The dashed line is equality.</p></div>
+      <div class="legend" id="lg-sc"></div>
+      <div class="viz" id="v-sc"></div>
+    </figure>
+    <figure>
+      <div class="cap"><h3>Reading the failures</h3></div>
+      <ul class="find" id="acc-notes"></ul>
+    </figure>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="zcr">
+  <header>
+    <div class="sec-tag"><span class="chip part">not ready to present</span><span class="eyebrow">substrate / exp1 · arm B</span></div>
+    <h2>Collision-free maps score lower at the SID level</h2>
+    <p class="lede">ZCR rewrites five RQ-KMeans maps so that no two items share a SID. Each ZCR model was trained with the same recipe as its native twin. These are reference scores only; no protocol covers the comparison yet.</p>
+  </header>
+  <figure>
+    <div class="cap"><h3>Hit@10, native vs ZCR</h3><p>calc.py scoring rule, as in every archived metric. Natives marked “not accepted” failed the acceptance check above.</p></div>
+    <div class="legend" id="lg-zcr"></div>
+    <div class="viz" id="v-zcr"></div>
+    <details class="tbl"><summary>Table: Hit@10, strict exact-SID Hit@10, NDCG@10</summary><div class="tablewrap" id="t-zcr"></div></details>
+  </figure>
+  <p class="note">Do not read the gap as “ZCR makes the model worse”. In a native map several items can share one SID, and SID-level scoring counts any of them as a hit. In retro exp7, 42% of native RQ-KMeans 3×128 hits came from such shared SIDs. A fair comparison needs item-level scoring under its own protocol.</p>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="grid">
+  <header>
+    <div class="sec-tag"><span class="chip wait" id="grid-chip">coming this week</span><span class="eyebrow">controlled / exp11 · copy grid</span></div>
+    <h2 id="grid-h">Copy estimates on the 12 accepted models</h2>
+    <p class="lede">The copy findings so far come from two checkpoints. exp11 repeats the core estimates on each of the 12 accepted retrained models, unchanged: replacing the most recent item (exp3), prefix-matched copying and the single-edge knockout (exp4, valid and test), and the copy block inside beam search (exp6). The protocol was written before any intervened run.</p>
+  </header>
+  <div id="grid-body"></div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="plan">
+  <header>
+    <div class="eyebrow">next</div>
+    <h2>What runs now and what comes next</h2>
+    <p class="lede">Each new experiment gets its protocol written before it runs, as for every result on this page.</p>
+    <div class="deadline"><span>Abstract <b>18 Oct</b></span><span>Full paper <b>25 Oct</b></span></div>
+  </header>
+  <div class="plan">
+    <div class="plan-item"><span class="chip wait">running</span><div>
+      <h3>Copy grid on the 12 accepted retrained models (exp11)</h3>
+      <p>Does copying hold beyond the two original checkpoints: other depths, width 512, and MQ? It also gives a first measure of training-run noise, because RQ-KMeans 3×128 now exists twice.</p>
+      <div class="cost">job 301495 · 4 GPUs · about 7 h once it starts · this page is rebuilt when it ends</div></div></div>
+    <div class="plan-item"><span class="chip part">your call</span><div>
+      <h3>When copying is learned</h3>
+      <p>The retrain kept only the best and last checkpoints, so no early-training states exist. Option A retrains RQ-KMeans 3×128 and RQ-VAE 4×128 keeping every half-epoch checkpoint, then runs exp4 on each. Option B runs exp4 on the 12 existing last checkpoints, about 1.5 epochs past the best.</p>
+      <div class="cost">A: about 2.5 h of training on 4 GPUs, then 7–8 GPU-h of exp4 · B: about 7 GPU-h</div></div></div>
+    <div class="plan-item"><span class="chip part">your call</span><div>
+      <h3>Co-author runs: keep more checkpoints</h3>
+      <p>The handoff keeps snapshots at epochs 0.5, 1 and 2 plus the best and last checkpoints. To keep every checkpoint, set <code>AR_SNAPSHOT_EPOCHS</code> to every half epoch before launch, in both handoff commands.</p>
+      <div class="cost">3.1 GB per snapshot · about +2 TB over 71 AR runs</div></div></div>
+    <div class="plan-item"><span class="chip wait">next</span><div>
+      <h3>Native vs collision-free models, scored per item</h3>
+      <p>Item-level Hit@10 for the three native/ZCR pairs whose native model was accepted (3×128, 4×128, 5×128), plus the copy knockout on the ZCR models. This tests whether collisions decide how much copying earns.</p>
+      <div class="cost">GPU, about 1.5 h per ZCR model · new protocol</div></div></div>
+    <div class="plan-item"><span class="chip wait">next</span><div>
+      <h3>Copied reviews under a protocol</h3>
+      <p>Re-score exp6, exp7, exp9 and the time study with and without the rows whose target is a review copied onto a variant item (about 15% of targets), on both catalogues.</p>
+      <div class="cost">CPU, about one day</div></div></div>
+    <div class="plan-item"><span class="chip wait">next</span><div>
+      <h3>DiffGRM side of the comparison</h3>
+      <p>exp7 and exp8 on all 20 DiffGRM checkpoints; the copy knockout inside the validated diffusion decoder (the DiffGRM version of exp6); and a layer and reveal-step readout matching the AR layer map.</p>
+      <div class="cost">CPU: about 2 h for exp7/exp8 · readout: hours · new protocols for the last two</div></div></div>
+    <div class="plan-item"><span class="chip wait">later</span><div>
+      <h3>Layer map on the retrained grid; merge experiment</h3>
+      <p>Tuned lens and SID decoders on the 12 retrained models (RQ2 across maps). Beam search that keeps one path per partial SID, since duplicate paths fill 57–91% of the DiffGRM beam.</p>
+      <div class="cost">about 12 × 15 GPU-min · merge: GPU hours</div></div></div>
+  </div>
+</section>
+
+<footer class="src" id="sources"></footer>
+</div>
+
+<script>
+const D = {"generated":"2026-10-06 19:47","grid_job":"301495","acceptance":[{"variant":"MQ_3codebook_128","label":"MQ 3\u00d7128","q":"MQ","depth":3,"width":128,"hr_new":22.49,"hr_old":23.01,"d":-0.52,"lo":-1.54,"hi":0.46,"d_ndcg":-0.32,"top1":0.413,"accepted":true,"train_min":66.3},{"variant":"MQ_3codebook_512","label":"MQ 3\u00d7512","q":"MQ","depth":3,"width":512,"hr_new":15.48,"hr_old":18.04,"d":-2.55,"lo":-3.45,"hi":-1.64,"d_ndcg":-1.5,"top1":0.447,"accepted":false,"train_min":60.0},{"variant":"MQ_4codebook_128","label":"MQ 4\u00d7128","q":"MQ","depth":4,"width":128,"hr_new":20.46,"hr_old":21.9,"d":-1.44,"lo":-2.43,"hi":-0.49,"d_ndcg":-1.44,"top1":0.464,"accepted":false,"train_min":60.0},{"variant":"MQ_4codebook_512","label":"MQ 4\u00d7512","q":"MQ","depth":4,"width":512,"hr_new":19.42,"hr_old":19.07,"d":0.35,"lo":-0.43,"hi":1.11,"d_ndcg":0.75,"top1":0.474,"accepted":true,"train_min":59.9},{"variant":"MQ_5codebook_128","label":"MQ 5\u00d7128","q":"MQ","depth":5,"width":128,"hr_new":18.61,"hr_old":16.71,"d":1.9,"lo":0.92,"hi":2.82,"d_ndcg":0.87,"top1":0.356,"accepted":false,"train_min":57.7},{"variant":"MQ_5codebook_512","label":"MQ 5\u00d7512","q":"MQ","depth":5,"width":512,"hr_new":17.6,"hr_old":15.65,"d":1.96,"lo":1.01,"hi":2.88,"d_ndcg":1.97,"top1":0.277,"accepted":false,"train_min":60.6},{"variant":"rqkmeans_3codebook_128","label":"RQ-KMeans 3\u00d7128","q":"rqkmeans","depth":3,"width":128,"hr_new":24.26,"hr_old":24.07,"d":0.19,"lo":-0.51,"hi":0.9,"d_ndcg":0.02,"top1":0.57,"accepted":true,"train_min":66.3},{"variant":"rqkmeans_3codebook_512","label":"RQ-KMeans 3\u00d7512","q":"rqkmeans","depth":3,"width":512,"hr_new":16.38,"hr_old":13.88,"d":2.5,"lo":1.6,"hi":3.4,"d_ndcg":1.55,"top1":0.298,"accepted":false,"train_min":66.7},{"variant":"rqkmeans_4codebook_128","label":"RQ-KMeans 4\u00d7128","q":"rqkmeans","depth":4,"width":128,"hr_new":19.42,"hr_old":19.48,"d":-0.05,"lo":-0.85,"hi":0.78,"d_ndcg":-0.76,"top1":0.411,"accepted":true,"train_min":66.6},{"variant":"rqkmeans_4codebook_512","label":"RQ-KMeans 4\u00d7512","q":"rqkmeans","depth":4,"width":512,"hr_new":13.39,"hr_old":15.29,"d":-1.9,"lo":-2.75,"hi":-1.1,"d_ndcg":-1.19,"top1":0.331,"accepted":false,"train_min":66.6},{"variant":"rqkmeans_5codebook_128","label":"RQ-KMeans 5\u00d7128","q":"rqkmeans","depth":5,"width":128,"hr_new":19.67,"hr_old":19.7,"d":-0.03,"lo":-0.76,"hi":0.66,"d_ndcg":-0.07,"top1":0.558,"accepted":true,"train_min":67.2},{"variant":"rqkmeans_5codebook_512","label":"RQ-KMeans 5\u00d7512","q":"rqkmeans","depth":5,"width":512,"hr_new":13.2,"hr_old":12.88,"d":0.33,"lo":-0.4,"hi":1.06,"d_ndcg":0.21,"top1":0.224,"accepted":true,"train_min":74.9},{"variant":"rqvae_3codebook_128","label":"RQ-VAE 3\u00d7128","q":"rqvae","depth":3,"width":128,"hr_new":13.56,"hr_old":12.61,"d":0.95,"lo":0.21,"hi":1.69,"d_ndcg":0.25,"top1":0.279,"accepted":true,"train_min":66.1},{"variant":"rqvae_3codebook_512","label":"RQ-VAE 3\u00d7512","q":"rqvae","depth":3,"width":512,"hr_new":14.29,"hr_old":14.07,"d":0.22,"lo":-0.56,"hi":0.94,"d_ndcg":0.27,"top1":0.421,"accepted":true,"train_min":64.2},{"variant":"rqvae_4codebook_128","label":"RQ-VAE 4\u00d7128","q":"rqvae","depth":4,"width":128,"hr_new":14.51,"hr_old":13.09,"d":1.41,"lo":0.57,"hi":2.23,"d_ndcg":0.78,"top1":0.311,"accepted":true,"train_min":64.8},{"variant":"rqvae_4codebook_512","label":"RQ-VAE 4\u00d7512","q":"rqvae","depth":4,"width":512,"hr_new":11.98,"hr_old":13.2,"d":-1.22,"lo":-1.95,"hi":-0.48,"d_ndcg":-0.63,"top1":0.296,"accepted":true,"train_min":74.5},{"variant":"rqvae_5codebook_128","label":"RQ-VAE 5\u00d7128","q":"rqvae","depth":5,"width":128,"hr_new":13.2,"hr_old":13.91,"d":-0.71,"lo":-1.67,"hi":0.16,"d_ndcg":-0.74,"top1":0.169,"accepted":true,"train_min":91.0},{"variant":"rqvae_5codebook_512","label":"RQ-VAE 5\u00d7512","q":"rqvae","depth":5,"width":512,"hr_new":13.75,"hr_old":14.4,"d":-0.65,"lo":-1.37,"hi":0.14,"d_ndcg":-0.35,"top1":0.448,"accepted":true,"train_min":67.3}],"acceptance_rho":0.87,"zcr":[{"variant":"rqkmeans_3codebook_128","label":"RQ-KMeans 3\u00d7128","native_hr":24.26,"native_strict":24.18,"native_accepted":true,"zcr_hr":11.98,"zcr_strict":11.87,"zcr_ndcg":8.89,"native_ndcg":17.14},{"variant":"rqkmeans_3codebook_512","label":"RQ-KMeans 3\u00d7512","native_hr":16.38,"native_strict":16.33,"native_accepted":false,"zcr_hr":13.42,"zcr_strict":12.9,"zcr_ndcg":9.94,"native_ndcg":11.73},{"variant":"rqkmeans_4codebook_128","label":"RQ-KMeans 4\u00d7128","native_hr":19.42,"native_strict":19.42,"native_accepted":true,"zcr_hr":13.47,"zcr_strict":12.88,"zcr_ndcg":9.84,"native_ndcg":14.58},{"variant":"rqkmeans_4codebook_512","label":"RQ-KMeans 4\u00d7512","native_hr":13.39,"native_strict":13.31,"native_accepted":false,"zcr_hr":12.36,"zcr_strict":11.74,"zcr_ndcg":9.26,"native_ndcg":9.99},{"variant":"rqkmeans_5codebook_128","label":"RQ-KMeans 5\u00d7128","native_hr":19.67,"native_strict":19.61,"native_accepted":true,"zcr_hr":15.24,"zcr_strict":14.64,"zcr_ndcg":10.93,"native_ndcg":14.45}],"models":{"rqkmeans_3codebook_128":"RQ-KMeans 3\u00d7128","rqvae_4codebook_128":"RQ-VAE 4\u00d7128"},"info":{"lens":{"rqkmeans_3codebook_128":{"tuned":[{"x":0,"y":0.097,"lo":0.0838,"hi":0.1109},{"x":1,"y":0.1076,"lo":0.0928,"hi":0.123},{"x":2,"y":0.0242,"lo":0.017,"hi":0.0326},{"x":3,"y":0.2945,"lo":0.2741,"hi":0.3163},{"x":4,"y":0.3556,"lo":0.3352,"hi":0.3767},{"x":5,"y":0.4181,"lo":0.3973,"hi":0.4396},{"x":6,"y":0.3888,"lo":0.3678,"hi":0.4115},{"x":7,"y":0.439,"lo":0.4184,"hi":0.4606},{"x":8,"y":0.4673,"lo":0.4468,"hi":0.4885},{"x":9,"y":0.4037,"lo":0.3832,"hi":0.4242},{"x":10,"y":0.4306,"lo":0.4112,"hi":0.452},{"x":11,"y":0.4472,"lo":0.4261,"hi":0.4689},{"x":12,"y":0.4697,"lo":0.4484,"hi":0.4924},{"x":13,"y":0.4537,"lo":0.4327,"hi":0.4747},{"x":14,"y":0.492,"lo":0.4707,"hi":0.5129},{"x":15,"y":0.4542,"lo":0.4338,"hi":0.4753},{"x":16,"y":0.5398,"lo":0.5209,"hi":0.5595},{"x":17,"y":0.5156,"lo":0.4958,"hi":0.5349},{"x":18,"y":0.4982,"lo":0.4777,"hi":0.5173},{"x":19,"y":0.6208,"lo":0.6017,"hi":0.6392},{"x":20,"y":0.5816,"lo":0.5621,"hi":0.6012},{"x":21,"y":0.6455,"lo":0.6272,"hi":0.6636},{"x":22,"y":0.6661,"lo":0.6478,"hi":0.6847},{"x":23,"y":0.7479,"lo":0.7321,"hi":0.7633},{"x":24,"y":0.7612,"lo":0.7451,"hi":0.7768},{"x":25,"y":0.8204,"lo":0.8068,"hi":0.8337},{"x":26,"y":0.8824,"lo":0.8713,"hi":0.8926},{"x":27,"y":0.9495,"lo":0.9422,"hi":0.9567}],"logit":[{"x":0,"y":0.0,"lo":0.0,"hi":0.0},{"x":1,"y":0.0,"lo":0.0,"hi":0.0},{"x":2,"y":0.0003,"lo":0.0,"hi":0.0008},{"x":3,"y":0.0,"lo":0.0,"hi":0.0},{"x":4,"y":0.0,"lo":0.0,"hi":0.0},{"x":5,"y":0.0,"lo":0.0,"hi":0.0},{"x":6,"y":0.0003,"lo":0.0,"hi":0.0008},{"x":7,"y":0.0003,"lo":0.0,"hi":0.0008},{"x":8,"y":0.0,"lo":0.0,"hi":0.0},{"x":9,"y":0.0003,"lo":0.0,"hi":0.0008},{"x":10,"y":0.0,"lo":0.0,"hi":0.0},{"x":11,"y":0.0,"lo":0.0,"hi":0.0},{"x":12,"y":0.0,"lo":0.0,"hi":0.0},{"x":13,"y":0.0024,"lo":0.0008,"hi":0.0043},{"x":14,"y":0.0022,"lo":0.0003,"hi":0.0047},{"x":15,"y":0.0008,"lo":0.0,"hi":0.0019},{"x":16,"y":0.0005,"lo":0.0,"hi":0.0014},{"x":17,"y":0.0008,"lo":0.0,"hi":0.0019},{"x":18,"y":0.0011,"lo":0.0003,"hi":0.0022},{"x":19,"y":0.0114,"lo":0.008,"hi":0.0149},{"x":20,"y":0.0592,"lo":0.0514,"hi":0.0671},{"x":21,"y":0.1019,"lo":0.0902,"hi":0.1141},{"x":22,"y":0.2861,"lo":0.2674,"hi":0.3056},{"x":23,"y":0.3303,"lo":0.3102,"hi":0.3511},{"x":24,"y":0.3608,"lo":0.3403,"hi":0.3811},{"x":25,"y":0.3855,"lo":0.3629,"hi":0.4059},{"x":26,"y":0.4803,"lo":0.4583,"hi":0.5019},{"x":27,"y":0.9571,"lo":0.9502,"hi":0.9639}]},"rqvae_4codebook_128":{"tuned":[{"x":0,"y":0.1766,"lo":0.1577,"hi":0.1961},{"x":1,"y":0.1997,"lo":0.1808,"hi":0.2206},{"x":2,"y":0.1937,"lo":0.1749,"hi":0.2143},{"x":3,"y":0.2309,"lo":0.2115,"hi":0.2518},{"x":4,"y":0.2116,"lo":0.1917,"hi":0.2325},{"x":5,"y":0.2385,"lo":0.2188,"hi":0.2583},{"x":6,"y":0.2195,"lo":0.1999,"hi":0.2394},{"x":7,"y":0.2518,"lo":0.2326,"hi":0.2734},{"x":8,"y":0.2641,"lo":0.2449,"hi":0.2839},{"x":9,"y":0.2852,"lo":0.2659,"hi":0.3062},{"x":10,"y":0.2757,"lo":0.2559,"hi":0.2957},{"x":11,"y":0.2986,"lo":0.2789,"hi":0.3188},{"x":12,"y":0.2931,"lo":0.2729,"hi":0.314},{"x":13,"y":0.3064,"lo":0.2869,"hi":0.3273},{"x":14,"y":0.3423,"lo":0.3218,"hi":0.3644},{"x":15,"y":0.3507,"lo":0.3311,"hi":0.3724},{"x":16,"y":0.36,"lo":0.3392,"hi":0.3826},{"x":17,"y":0.3692,"lo":0.3489,"hi":0.3905},{"x":18,"y":0.4146,"lo":0.3942,"hi":0.4366},{"x":19,"y":0.3869,"lo":0.3672,"hi":0.4083},{"x":20,"y":0.5499,"lo":0.531,"hi":0.5697},{"x":21,"y":0.5662,"lo":0.5465,"hi":0.5851},{"x":22,"y":0.6536,"lo":0.6363,"hi":0.6711},{"x":23,"y":0.6952,"lo":0.6773,"hi":0.7127},{"x":24,"y":0.7427,"lo":0.727,"hi":0.7598},{"x":25,"y":0.7884,"lo":0.7736,"hi":0.8032},{"x":26,"y":0.8256,"lo":0.8117,"hi":0.8386},{"x":27,"y":0.9318,"lo":0.9229,"hi":0.9407}],"logit":[{"x":0,"y":0.0462,"lo":0.0369,"hi":0.0562},{"x":1,"y":0.0465,"lo":0.0371,"hi":0.0565},{"x":2,"y":0.0465,"lo":0.0371,"hi":0.0565},{"x":3,"y":0.0446,"lo":0.0356,"hi":0.0543},{"x":4,"y":0.0465,"lo":0.0371,"hi":0.0565},{"x":5,"y":0.0062,"lo":0.0035,"hi":0.0094},{"x":6,"y":0.0052,"lo":0.0027,"hi":0.008},{"x":7,"y":0.0122,"lo":0.0085,"hi":0.0165},{"x":8,"y":0.0106,"lo":0.0071,"hi":0.0147},{"x":9,"y":0.0103,"lo":0.0068,"hi":0.0143},{"x":10,"y":0.0054,"lo":0.0027,"hi":0.0089},{"x":11,"y":0.0448,"lo":0.0357,"hi":0.0546},{"x":12,"y":0.0456,"lo":0.0366,"hi":0.0553},{"x":13,"y":0.0435,"lo":0.0345,"hi":0.053},{"x":14,"y":0.0388,"lo":0.0304,"hi":0.0481},{"x":15,"y":0.0427,"lo":0.0334,"hi":0.0521},{"x":16,"y":0.0994,"lo":0.0849,"hi":0.1144},{"x":17,"y":0.1209,"lo":0.1038,"hi":0.139},{"x":18,"y":0.0916,"lo":0.0771,"hi":0.1073},{"x":19,"y":0.1043,"lo":0.0902,"hi":0.1199},{"x":20,"y":0.1703,"lo":0.1522,"hi":0.1891},{"x":21,"y":0.2059,"lo":0.1876,"hi":0.2243},{"x":22,"y":0.2472,"lo":0.2284,"hi":0.2674},{"x":23,"y":0.2877,"lo":0.2675,"hi":0.3076},{"x":24,"y":0.3195,"lo":0.2988,"hi":0.34},{"x":25,"y":0.367,"lo":0.3447,"hi":0.3883},{"x":26,"y":0.3964,"lo":0.375,"hi":0.4174},{"x":27,"y":0.9424,"lo":0.9347,"hi":0.9501}]}},"decoders":{"rqkmeans_3codebook_128":{"answer_at_R0":{"exact":[{"x":0,"y":0.6243,"lo":0.6067,"hi":0.6426},{"x":2,"y":0.6525,"lo":0.6339,"hi":0.6713},{"x":4,"y":0.6593,"lo":0.6423,"hi":0.677},{"x":6,"y":0.6645,"lo":0.647,"hi":0.6818},{"x":8,"y":0.6697,"lo":0.6521,"hi":0.687},{"x":10,"y":0.68,"lo":0.6625,"hi":0.6967},{"x":12,"y":0.6794,"lo":0.6621,"hi":0.6961},{"x":14,"y":0.6879,"lo":0.6701,"hi":0.705},{"x":16,"y":0.6797,"lo":0.6626,"hi":0.6963},{"x":18,"y":0.6811,"lo":0.6641,"hi":0.6986},{"x":20,"y":0.7023,"lo":0.685,"hi":0.7194},{"x":22,"y":0.7061,"lo":0.6898,"hi":0.722},{"x":24,"y":0.708,"lo":0.6902,"hi":0.7244},{"x":26,"y":0.7259,"lo":0.7094,"hi":0.7417},{"x":27,"y":0.7427,"lo":0.727,"hi":0.7586}],"noncopy":[{"x":0,"y":0.4943,"lo":0.4686,"hi":0.5193},{"x":2,"y":0.5354,"lo":0.5092,"hi":0.5612},{"x":4,"y":0.5515,"lo":0.5271,"hi":0.5759},{"x":6,"y":0.5722,"lo":0.5481,"hi":0.5954},{"x":8,"y":0.5722,"lo":0.5481,"hi":0.5967},{"x":10,"y":0.5807,"lo":0.5561,"hi":0.6046},{"x":12,"y":0.5788,"lo":0.554,"hi":0.6032},{"x":14,"y":0.5722,"lo":0.5475,"hi":0.5964},{"x":16,"y":0.5576,"lo":0.5326,"hi":0.5814},{"x":18,"y":0.5633,"lo":0.5387,"hi":0.5883},{"x":20,"y":0.5987,"lo":0.5753,"hi":0.6225},{"x":22,"y":0.6114,"lo":0.5879,"hi":0.6335},{"x":24,"y":0.6298,"lo":0.6066,"hi":0.6524},{"x":26,"y":0.6667,"lo":0.6454,"hi":0.6882},{"x":27,"y":0.6832,"lo":0.662,"hi":0.7053}],"prior":0.0356,"rule":0.4246,"rule_name":"copy rule"},"golden_at_R0":{"exact":[{"x":0,"y":0.1133,"lo":0.0988,"hi":0.1275},{"x":2,"y":0.1149,"lo":0.1011,"hi":0.1292},{"x":4,"y":0.11,"lo":0.0962,"hi":0.1239},{"x":6,"y":0.1122,"lo":0.0983,"hi":0.126},{"x":8,"y":0.1092,"lo":0.0957,"hi":0.1231},{"x":10,"y":0.1117,"lo":0.0982,"hi":0.1256},{"x":12,"y":0.116,"lo":0.102,"hi":0.1302},{"x":14,"y":0.1081,"lo":0.0946,"hi":0.1221},{"x":16,"y":0.1073,"lo":0.0937,"hi":0.121},{"x":18,"y":0.1073,"lo":0.0943,"hi":0.1218},{"x":20,"y":0.1125,"lo":0.0993,"hi":0.1268},{"x":22,"y":0.1089,"lo":0.0957,"hi":0.1228},{"x":24,"y":0.1111,"lo":0.097,"hi":0.1252},{"x":26,"y":0.1081,"lo":0.0947,"hi":0.1219},{"x":27,"y":0.1111,"lo":0.0981,"hi":0.1252}],"prior":0.0456,"rule":0.0945,"rule_name":"copy rule"},"item_at_first":{"exact":[{"x":0,"y":0.3234,"lo":0.3082,"hi":0.3391},{"x":2,"y":0.331,"lo":0.3159,"hi":0.3469},{"x":4,"y":0.3381,"lo":0.3235,"hi":0.3535},{"x":6,"y":0.3472,"lo":0.3317,"hi":0.3625},{"x":8,"y":0.3567,"lo":0.3414,"hi":0.3718},{"x":10,"y":0.3521,"lo":0.3355,"hi":0.3679},{"x":12,"y":0.3463,"lo":0.3307,"hi":0.3617},{"x":14,"y":0.3562,"lo":0.3404,"hi":0.3718},{"x":16,"y":0.353,"lo":0.3374,"hi":0.3677},{"x":18,"y":0.3558,"lo":0.34,"hi":0.371},{"x":20,"y":0.3583,"lo":0.3429,"hi":0.3735},{"x":22,"y":0.3644,"lo":0.3485,"hi":0.3801},{"x":24,"y":0.3616,"lo":0.3462,"hi":0.3767},{"x":26,"y":0.3668,"lo":0.3508,"hi":0.382},{"x":27,"y":0.3738,"lo":0.358,"hi":0.3887}],"prior":0.003,"rule":0.314,"rule_name":"mode-given-digit0 rule"},"item_at_last":{"exact":[{"x":0,"y":0.7632,"lo":0.7517,"hi":0.7744},{"x":2,"y":0.9992,"lo":0.9985,"hi":0.9997},{"x":4,"y":0.9993,"lo":0.9987,"hi":0.9998},{"x":6,"y":0.9995,"lo":0.9989,"hi":0.9999},{"x":8,"y":0.9995,"lo":0.9989,"hi":0.9999},{"x":10,"y":0.9993,"lo":0.9987,"hi":0.9998},{"x":12,"y":0.9993,"lo":0.9986,"hi":0.9998},{"x":14,"y":0.9995,"lo":0.9989,"hi":0.9999},{"x":16,"y":0.9994,"lo":0.9988,"hi":0.9999},{"x":18,"y":0.9989,"lo":0.9981,"hi":0.9996},{"x":20,"y":0.9991,"lo":0.9983,"hi":0.9997},{"x":22,"y":0.9997,"lo":0.9991,"hi":1.0},{"x":24,"y":0.9989,"lo":0.9982,"hi":0.9996},{"x":26,"y":0.9984,"lo":0.9976,"hi":0.9992},{"x":27,"y":0.9976,"lo":0.9965,"hi":0.9986}],"prior":0.003,"rule":null,"rule_name":null},"prev_item_at_last":{"exact":[{"x":0,"y":0.4506,"lo":0.4319,"hi":0.4683},{"x":2,"y":0.6718,"lo":0.6566,"hi":0.6871},{"x":4,"y":0.5688,"lo":0.5503,"hi":0.5867},{"x":6,"y":0.5884,"lo":0.5702,"hi":0.6077},{"x":8,"y":0.6435,"lo":0.6253,"hi":0.6614},{"x":10,"y":0.6706,"lo":0.6522,"hi":0.6886},{"x":12,"y":0.7045,"lo":0.6865,"hi":0.7214},{"x":14,"y":0.7919,"lo":0.7775,"hi":0.8063},{"x":16,"y":0.7578,"lo":0.7431,"hi":0.7723},{"x":18,"y":0.7833,"lo":0.77,"hi":0.7963},{"x":20,"y":0.7206,"lo":0.7042,"hi":0.7365},{"x":22,"y":0.6572,"lo":0.6388,"hi":0.6745},{"x":24,"y":0.5789,"lo":0.5585,"hi":0.5985},{"x":26,"y":0.5889,"lo":0.5676,"hi":0.6096},{"x":27,"y":0.6085,"lo":0.5894,"hi":0.6273}],"prior":0.0033,"rule":null,"rule_name":null},"r1_at_R0":{"exact":[{"x":0,"y":0.9606,"lo":0.9546,"hi":0.9668},{"x":2,"y":0.994,"lo":0.991,"hi":0.9966},{"x":4,"y":0.9951,"lo":0.9928,"hi":0.9973},{"x":6,"y":0.987,"lo":0.9833,"hi":0.9905},{"x":8,"y":0.987,"lo":0.9833,"hi":0.9905},{"x":10,"y":0.9916,"lo":0.9884,"hi":0.9943},{"x":12,"y":0.9897,"lo":0.9863,"hi":0.993},{"x":14,"y":0.9894,"lo":0.986,"hi":0.9925},{"x":16,"y":0.9908,"lo":0.9877,"hi":0.9938},{"x":18,"y":0.9867,"lo":0.9828,"hi":0.9902},{"x":20,"y":0.9775,"lo":0.9723,"hi":0.9823},{"x":22,"y":0.9525,"lo":0.9451,"hi":0.9595},{"x":24,"y":0.8935,"lo":0.8819,"hi":0.9044},{"x":26,"y":0.8653,"lo":0.8535,"hi":0.8764},{"x":27,"y":0.8672,"lo":0.8551,"hi":0.8788}],"prior":0.0467,"rule":null,"rule_name":null}},"rqvae_4codebook_128":{"answer_at_R0":{"exact":[{"x":0,"y":0.4866,"lo":0.4664,"hi":0.5065},{"x":2,"y":0.5086,"lo":0.4882,"hi":0.5292},{"x":4,"y":0.5121,"lo":0.4927,"hi":0.5323},{"x":6,"y":0.5485,"lo":0.53,"hi":0.5692},{"x":8,"y":0.5681,"lo":0.5483,"hi":0.5893},{"x":10,"y":0.5928,"lo":0.5732,"hi":0.6123},{"x":12,"y":0.5816,"lo":0.5613,"hi":0.6027},{"x":14,"y":0.5808,"lo":0.5608,"hi":0.6018},{"x":16,"y":0.5936,"lo":0.5747,"hi":0.6128},{"x":18,"y":0.5968,"lo":0.5783,"hi":0.617},{"x":20,"y":0.6039,"lo":0.5849,"hi":0.6238},{"x":22,"y":0.6455,"lo":0.6275,"hi":0.6638},{"x":24,"y":0.6498,"lo":0.6316,"hi":0.6683},{"x":26,"y":0.668,"lo":0.6505,"hi":0.686},{"x":27,"y":0.6699,"lo":0.6515,"hi":0.6892}],"noncopy":[{"x":0,"y":0.4579,"lo":0.4347,"hi":0.4806},{"x":2,"y":0.4738,"lo":0.4511,"hi":0.4973},{"x":4,"y":0.478,"lo":0.4552,"hi":0.5007},{"x":6,"y":0.5305,"lo":0.5083,"hi":0.5537},{"x":8,"y":0.5548,"lo":0.5326,"hi":0.5772},{"x":10,"y":0.5752,"lo":0.5539,"hi":0.5967},{"x":12,"y":0.5658,"lo":0.5434,"hi":0.5889},{"x":14,"y":0.5629,"lo":0.5405,"hi":0.5855},{"x":16,"y":0.5771,"lo":0.5559,"hi":0.5984},{"x":18,"y":0.5794,"lo":0.5587,"hi":0.6007},{"x":20,"y":0.5875,"lo":0.5663,"hi":0.6091},{"x":22,"y":0.6309,"lo":0.6108,"hi":0.6505},{"x":24,"y":0.6384,"lo":0.6179,"hi":0.6587},{"x":26,"y":0.6598,"lo":0.64,"hi":0.679},{"x":27,"y":0.6636,"lo":0.6435,"hi":0.6845}],"prior":0.1098,"rule":0.1616,"rule_name":"copy rule"},"golden_at_R0":{"exact":[{"x":0,"y":0.0695,"lo":0.0591,"hi":0.081},{"x":2,"y":0.0671,"lo":0.0566,"hi":0.0788},{"x":4,"y":0.0687,"lo":0.0581,"hi":0.0802},{"x":6,"y":0.0676,"lo":0.0572,"hi":0.0791},{"x":8,"y":0.0687,"lo":0.058,"hi":0.0805},{"x":10,"y":0.0723,"lo":0.0615,"hi":0.0841},{"x":12,"y":0.0698,"lo":0.0589,"hi":0.0818},{"x":14,"y":0.0731,"lo":0.062,"hi":0.0849},{"x":16,"y":0.0714,"lo":0.0604,"hi":0.0836},{"x":18,"y":0.072,"lo":0.0611,"hi":0.084},{"x":20,"y":0.0744,"lo":0.0631,"hi":0.0868},{"x":22,"y":0.0763,"lo":0.0652,"hi":0.0886},{"x":24,"y":0.078,"lo":0.0666,"hi":0.0899},{"x":26,"y":0.0761,"lo":0.0647,"hi":0.0883},{"x":27,"y":0.0733,"lo":0.0624,"hi":0.085}],"prior":0.0456,"rule":0.0448,"rule_name":"copy rule"},"item_at_first":{"exact":[{"x":0,"y":0.106,"lo":0.0965,"hi":0.1158},{"x":2,"y":0.0963,"lo":0.0876,"hi":0.1056},{"x":4,"y":0.1064,"lo":0.0968,"hi":0.1162},{"x":6,"y":0.1107,"lo":0.101,"hi":0.1207},{"x":8,"y":0.13,"lo":0.1194,"hi":0.1408},{"x":10,"y":0.1275,"lo":0.117,"hi":0.138},{"x":12,"y":0.1338,"lo":0.1235,"hi":0.1444},{"x":14,"y":0.1342,"lo":0.1241,"hi":0.1445},{"x":16,"y":0.1395,"lo":0.129,"hi":0.1509},{"x":18,"y":0.1426,"lo":0.132,"hi":0.1538},{"x":20,"y":0.1622,"lo":0.1513,"hi":0.1735},{"x":22,"y":0.166,"lo":0.1549,"hi":0.1778},{"x":24,"y":0.172,"lo":0.1606,"hi":0.1837},{"x":26,"y":0.1841,"lo":0.1726,"hi":0.1958},{"x":27,"y":0.1898,"lo":0.1778,"hi":0.2015}],"prior":0.0297,"rule":0.0984,"rule_name":"mode-given-digit0 rule"},"item_at_last":{"exact":[{"x":0,"y":0.9815,"lo":0.9773,"hi":0.9853},{"x":2,"y":0.9947,"lo":0.9924,"hi":0.9966},{"x":4,"y":0.9992,"lo":0.9985,"hi":0.9997},{"x":6,"y":0.9975,"lo":0.9963,"hi":0.9987},{"x":8,"y":0.997,"lo":0.9957,"hi":0.9983},{"x":10,"y":0.9959,"lo":0.9941,"hi":0.9974},{"x":12,"y":0.9931,"lo":0.991,"hi":0.9952},{"x":14,"y":0.9953,"lo":0.9933,"hi":0.997},{"x":16,"y":0.9936,"lo":0.9913,"hi":0.9956},{"x":18,"y":0.9925,"lo":0.99,"hi":0.9947},{"x":20,"y":0.9919,"lo":0.9894,"hi":0.9941},{"x":22,"y":0.9951,"lo":0.9931,"hi":0.9969},{"x":24,"y":0.99,"lo":0.9871,"hi":0.9927},{"x":26,"y":0.9865,"lo":0.9831,"hi":0.9895},{"x":27,"y":0.985,"lo":0.9813,"hi":0.9884}],"prior":0.0297,"rule":null,"rule_name":null},"prev_item_at_last":{"exact":[{"x":0,"y":0.1295,"lo":0.1185,"hi":0.1404},{"x":2,"y":0.3862,"lo":0.3671,"hi":0.4034},{"x":4,"y":0.315,"lo":0.2976,"hi":0.332},{"x":6,"y":0.4393,"lo":0.4188,"hi":0.4586},{"x":8,"y":0.607,"lo":0.5875,"hi":0.6252},{"x":10,"y":0.5657,"lo":0.5445,"hi":0.5848},{"x":12,"y":0.6268,"lo":0.6082,"hi":0.645},{"x":14,"y":0.5976,"lo":0.5787,"hi":0.6169},{"x":16,"y":0.5594,"lo":0.5379,"hi":0.5792},{"x":18,"y":0.5011,"lo":0.481,"hi":0.5212},{"x":20,"y":0.491,"lo":0.4683,"hi":0.5118},{"x":22,"y":0.4368,"lo":0.4161,"hi":0.4568},{"x":24,"y":0.4128,"lo":0.3907,"hi":0.4343},{"x":26,"y":0.3752,"lo":0.3549,"hi":0.3952},{"x":27,"y":0.4139,"lo":0.3926,"hi":0.4338}],"prior":0.0253,"rule":null,"rule_name":null},"r1_at_R0":{"exact":[{"x":0,"y":0.9565,"lo":0.9497,"hi":0.9631},{"x":2,"y":0.9859,"lo":0.9818,"hi":0.9897},{"x":4,"y":0.987,"lo":0.9829,"hi":0.9909},{"x":6,"y":0.9679,"lo":0.9617,"hi":0.9738},{"x":8,"y":0.9533,"lo":0.9455,"hi":0.9605},{"x":10,"y":0.9313,"lo":0.9227,"hi":0.9394},{"x":12,"y":0.8932,"lo":0.8826,"hi":0.9034},{"x":14,"y":0.9044,"lo":0.8941,"hi":0.9142},{"x":16,"y":0.8536,"lo":0.842,"hi":0.8653},{"x":18,"y":0.8191,"lo":0.8058,"hi":0.8321},{"x":20,"y":0.6721,"lo":0.6554,"hi":0.6884},{"x":22,"y":0.6088,"lo":0.5906,"hi":0.6264},{"x":24,"y":0.5439,"lo":0.5255,"hi":0.5629},{"x":26,"y":0.5194,"lo":0.5011,"hi":0.537},{"x":27,"y":0.5219,"lo":0.5035,"hi":0.5396}],"prior":0.0467,"rule":null,"rule_name":null}}},"d4":[{"model":"rqkmeans_3codebook_128","subset":"all","median":21.0,"q1":14.0,"q3":25.0,"n":3681,"never":0.051},{"model":"rqkmeans_3codebook_128","subset":"copy answer","median":17.0,"q1":4.0,"q3":21.0,"n":1563,"never":0.019},{"model":"rqkmeans_3codebook_128","subset":"non-copy answer","median":23.0,"q1":20.0,"q3":26.0,"n":2118,"never":0.074},{"model":"rqkmeans_3codebook_128","subset":"repeat target","median":14.0,"q1":3.0,"q3":23.0,"n":521,"never":0.025},{"model":"rqkmeans_3codebook_128","subset":"new target","median":22.0,"q1":16.0,"q3":25.0,"n":3160,"never":0.055},{"model":"rqvae_4codebook_128","subset":"all","median":22.0,"q1":19.0,"q3":25.0,"n":3681,"never":0.068},{"model":"rqvae_4codebook_128","subset":"copy answer","median":19.0,"q1":9.0,"q3":22.0,"n":595,"never":0.018},{"model":"rqvae_4codebook_128","subset":"non-copy answer","median":23.0,"q1":20.0,"q3":26.0,"n":3086,"never":0.078},{"model":"rqvae_4codebook_128","subset":"repeat target","median":6.0,"q1":0.0,"q3":19.0,"n":178,"never":0.006},{"model":"rqvae_4codebook_128","subset":"new target","median":22.0,"q1":20.0,"q3":25.0,"n":3503,"never":0.071}],"census":{"rqkmeans_3codebook_128":[{"x":0,"copy":0.0,"answer":0.0,"unexplained":1.0,"n_live":32,"n_answer":0,"n_beyond":0},{"x":2,"copy":0.0,"answer":0.0,"unexplained":0.97,"n_live":33,"n_answer":0,"n_beyond":0},{"x":4,"copy":0.281,"answer":0.094,"unexplained":0.625,"n_live":64,"n_answer":6,"n_beyond":4},{"x":6,"copy":0.391,"answer":0.078,"unexplained":0.531,"n_live":64,"n_answer":5,"n_beyond":1},{"x":8,"copy":0.232,"answer":0.071,"unexplained":0.696,"n_live":56,"n_answer":4,"n_beyond":2},{"x":10,"copy":0.375,"answer":0.078,"unexplained":0.547,"n_live":64,"n_answer":5,"n_beyond":3},{"x":12,"copy":0.344,"answer":0.098,"unexplained":0.557,"n_live":61,"n_answer":6,"n_beyond":3},{"x":14,"copy":0.328,"answer":0.103,"unexplained":0.569,"n_live":58,"n_answer":6,"n_beyond":4},{"x":16,"copy":0.391,"answer":0.072,"unexplained":0.536,"n_live":69,"n_answer":5,"n_beyond":4},{"x":18,"copy":0.339,"answer":0.061,"unexplained":0.6,"n_live":115,"n_answer":7,"n_beyond":3},{"x":20,"copy":0.387,"answer":0.089,"unexplained":0.524,"n_live":124,"n_answer":11,"n_beyond":7},{"x":22,"copy":0.446,"answer":0.129,"unexplained":0.425,"n_live":294,"n_answer":38,"n_beyond":23},{"x":24,"copy":0.492,"answer":0.135,"unexplained":0.373,"n_live":630,"n_answer":85,"n_beyond":53},{"x":26,"copy":0.41,"answer":0.143,"unexplained":0.432,"n_live":644,"n_answer":92,"n_beyond":57},{"x":27,"copy":0.349,"answer":0.133,"unexplained":0.494,"n_live":255,"n_answer":34,"n_beyond":17}],"rqkmeans_3codebook_128|H_0":[{"x":0,"token":0.982,"prev":0.0},{"x":2,"token":0.977,"prev":0.003},{"x":4,"token":0.96,"prev":0.011},{"x":6,"token":0.954,"prev":0.012},{"x":8,"token":0.953,"prev":0.012},{"x":10,"token":0.948,"prev":0.009},{"x":12,"token":0.941,"prev":0.011},{"x":14,"token":0.913,"prev":0.016},{"x":16,"token":0.885,"prev":0.026},{"x":18,"token":0.843,"prev":0.034},{"x":20,"token":0.818,"prev":0.046},{"x":22,"token":0.74,"prev":0.067},{"x":24,"token":0.71,"prev":0.058},{"x":26,"token":0.667,"prev":0.06},{"x":27,"token":0.554,"prev":0.065}],"rqvae_4codebook_128":[{"x":0,"copy":0.071,"answer":0.0,"unexplained":0.929,"n_live":42,"n_answer":0,"n_beyond":0},{"x":2,"copy":0.083,"answer":0.0,"unexplained":0.917,"n_live":36,"n_answer":0,"n_beyond":0},{"x":4,"copy":0.277,"answer":0.021,"unexplained":0.702,"n_live":47,"n_answer":1,"n_beyond":0},{"x":6,"copy":0.222,"answer":0.044,"unexplained":0.733,"n_live":45,"n_answer":2,"n_beyond":1},{"x":8,"copy":0.13,"answer":0.074,"unexplained":0.796,"n_live":54,"n_answer":4,"n_beyond":3},{"x":10,"copy":0.138,"answer":0.077,"unexplained":0.785,"n_live":65,"n_answer":5,"n_beyond":3},{"x":12,"copy":0.299,"answer":0.045,"unexplained":0.657,"n_live":67,"n_answer":3,"n_beyond":2},{"x":14,"copy":0.206,"answer":0.044,"unexplained":0.75,"n_live":68,"n_answer":3,"n_beyond":1},{"x":16,"copy":0.188,"answer":0.059,"unexplained":0.752,"n_live":101,"n_answer":6,"n_beyond":5},{"x":18,"copy":0.188,"answer":0.026,"unexplained":0.786,"n_live":154,"n_answer":4,"n_beyond":2},{"x":20,"copy":0.162,"answer":0.038,"unexplained":0.8,"n_live":265,"n_answer":10,"n_beyond":7},{"x":22,"copy":0.164,"answer":0.041,"unexplained":0.795,"n_live":458,"n_answer":19,"n_beyond":12},{"x":24,"copy":0.142,"answer":0.088,"unexplained":0.757,"n_live":593,"n_answer":52,"n_beyond":31},{"x":26,"copy":0.141,"answer":0.091,"unexplained":0.76,"n_live":505,"n_answer":46,"n_beyond":29},{"x":27,"copy":0.179,"answer":0.068,"unexplained":0.665,"n_live":251,"n_answer":17,"n_beyond":11}],"rqvae_4codebook_128|H_0":[{"x":0,"token":0.951,"prev":0.001},{"x":2,"token":0.955,"prev":0.002},{"x":4,"token":0.946,"prev":0.009},{"x":6,"token":0.925,"prev":0.006},{"x":8,"token":0.932,"prev":0.014},{"x":10,"token":0.92,"prev":0.006},{"x":12,"token":0.878,"prev":0.022},{"x":14,"token":0.839,"prev":0.013},{"x":16,"token":0.791,"prev":0.019},{"x":18,"token":0.778,"prev":0.02},{"x":20,"token":0.622,"prev":0.041},{"x":22,"token":0.516,"prev":0.05},{"x":24,"token":0.473,"prev":0.041},{"x":26,"token":0.449,"prev":0.03},{"x":27,"token":0.425,"prev":0.029}]},"headline":{"rqkmeans_3codebook_128":{"greedy_golden":0.109,"greedy_beam":0.695},"rqvae_4codebook_128":{"greedy_golden":0.063,"greedy_beam":0.419}},"digits":{"rqkmeans_3codebook_128":{"0":[{"x":0,"y":0.1087,"lo":0.0953,"hi":0.1226},{"x":1,"y":0.1557,"lo":0.1401,"hi":0.1724},{"x":2,"y":0.0546,"lo":0.0447,"hi":0.065},{"x":3,"y":0.3991,"lo":0.3788,"hi":0.4204},{"x":4,"y":0.6099,"lo":0.5918,"hi":0.6291},{"x":5,"y":0.6411,"lo":0.6225,"hi":0.6601},{"x":6,"y":0.5977,"lo":0.5779,"hi":0.6177},{"x":7,"y":0.6683,"lo":0.6505,"hi":0.6863},{"x":8,"y":0.6555,"lo":0.6375,"hi":0.6736},{"x":9,"y":0.6601,"lo":0.642,"hi":0.6782},{"x":10,"y":0.6683,"lo":0.6508,"hi":0.6873},{"x":11,"y":0.6452,"lo":0.6262,"hi":0.6637},{"x":12,"y":0.6794,"lo":0.6613,"hi":0.6986},{"x":13,"y":0.6783,"lo":0.6618,"hi":0.6956},{"x":14,"y":0.6457,"lo":0.6274,"hi":0.6646},{"x":15,"y":0.6941,"lo":0.6783,"hi":0.7106},{"x":16,"y":0.6938,"lo":0.6779,"hi":0.71},{"x":17,"y":0.6895,"lo":0.6717,"hi":0.7069},{"x":18,"y":0.687,"lo":0.6709,"hi":0.7044},{"x":19,"y":0.7517,"lo":0.7357,"hi":0.7677},{"x":20,"y":0.7751,"lo":0.7604,"hi":0.7899},{"x":21,"y":0.7881,"lo":0.7732,"hi":0.8028},{"x":22,"y":0.8397,"lo":0.8261,"hi":0.8528},{"x":23,"y":0.8644,"lo":0.852,"hi":0.8764},{"x":24,"y":0.8691,"lo":0.857,"hi":0.8807},{"x":25,"y":0.8987,"lo":0.8887,"hi":0.909},{"x":26,"y":0.9459,"lo":0.9379,"hi":0.9536},{"x":27,"y":0.9802,"lo":0.9756,"hi":0.9847}],"1":[{"x":0,"y":0.6417,"lo":0.6218,"hi":0.6615},{"x":1,"y":0.6558,"lo":0.6352,"hi":0.6768},{"x":2,"y":0.6547,"lo":0.6351,"hi":0.6753},{"x":3,"y":0.6612,"lo":0.6419,"hi":0.6825},{"x":4,"y":0.6637,"lo":0.6441,"hi":0.6839},{"x":5,"y":0.6686,"lo":0.6493,"hi":0.6887},{"x":6,"y":0.6743,"lo":0.6558,"hi":0.694},{"x":7,"y":0.6797,"lo":0.6614,"hi":0.6997},{"x":8,"y":0.7408,"lo":0.7244,"hi":0.7573},{"x":9,"y":0.7376,"lo":0.7211,"hi":0.7546},{"x":10,"y":0.7262,"lo":0.7096,"hi":0.7432},{"x":11,"y":0.7332,"lo":0.7163,"hi":0.7508},{"x":12,"y":0.7476,"lo":0.731,"hi":0.7642},{"x":13,"y":0.7267,"lo":0.7101,"hi":0.7443},{"x":14,"y":0.8139,"lo":0.7982,"hi":0.8289},{"x":15,"y":0.818,"lo":0.803,"hi":0.8324},{"x":16,"y":0.8365,"lo":0.8218,"hi":0.8503},{"x":17,"y":0.8207,"lo":0.8068,"hi":0.8351},{"x":18,"y":0.806,"lo":0.7914,"hi":0.82},{"x":19,"y":0.8818,"lo":0.8699,"hi":0.8931},{"x":20,"y":0.8845,"lo":0.8729,"hi":0.8955},{"x":21,"y":0.8943,"lo":0.8828,"hi":0.9044},{"x":22,"y":0.9019,"lo":0.8908,"hi":0.9126},{"x":23,"y":0.9174,"lo":0.9075,"hi":0.9267},{"x":24,"y":0.9332,"lo":0.9238,"hi":0.9416},{"x":25,"y":0.9495,"lo":0.942,"hi":0.9565},{"x":26,"y":0.9582,"lo":0.9511,"hi":0.9646},{"x":27,"y":0.9821,"lo":0.9776,"hi":0.9862}],"2":[{"x":0,"y":0.7846,"lo":0.7682,"hi":0.8003},{"x":1,"y":0.7968,"lo":0.7808,"hi":0.8136},{"x":2,"y":0.8351,"lo":0.8214,"hi":0.8485},{"x":3,"y":0.8446,"lo":0.8313,"hi":0.8572},{"x":4,"y":0.7892,"lo":0.77,"hi":0.8074},{"x":5,"y":0.8264,"lo":0.8131,"hi":0.8398},{"x":6,"y":0.8136,"lo":0.799,"hi":0.8282},{"x":7,"y":0.8294,"lo":0.8152,"hi":0.8441},{"x":8,"y":0.8506,"lo":0.8382,"hi":0.8631},{"x":9,"y":0.7786,"lo":0.7592,"hi":0.7974},{"x":10,"y":0.8096,"lo":0.7945,"hi":0.8241},{"x":11,"y":0.8324,"lo":0.8176,"hi":0.8465},{"x":12,"y":0.8234,"lo":0.8088,"hi":0.8376},{"x":13,"y":0.8229,"lo":0.8086,"hi":0.8369},{"x":14,"y":0.8729,"lo":0.8598,"hi":0.8851},{"x":15,"y":0.7935,"lo":0.7716,"hi":0.8134},{"x":16,"y":0.8854,"lo":0.8739,"hi":0.8974},{"x":17,"y":0.8715,"lo":0.8591,"hi":0.8834},{"x":18,"y":0.8514,"lo":0.8379,"hi":0.865},{"x":19,"y":0.8987,"lo":0.8872,"hi":0.9095},{"x":20,"y":0.8452,"lo":0.828,"hi":0.8617},{"x":21,"y":0.9014,"lo":0.8901,"hi":0.9119},{"x":22,"y":0.8685,"lo":0.8532,"hi":0.8832},{"x":23,"y":0.9364,"lo":0.9274,"hi":0.9447},{"x":24,"y":0.934,"lo":0.9236,"hi":0.9434},{"x":25,"y":0.9584,"lo":0.9511,"hi":0.965},{"x":26,"y":0.9712,"lo":0.9653,"hi":0.9771},{"x":27,"y":0.9842,"lo":0.9801,"hi":0.9881}]},"rqvae_4codebook_128":{"0":[{"x":0,"y":0.567,"lo":0.5449,"hi":0.5887},{"x":1,"y":0.6055,"lo":0.5848,"hi":0.6268},{"x":2,"y":0.6308,"lo":0.6104,"hi":0.6517},{"x":3,"y":0.7085,"lo":0.6898,"hi":0.7269},{"x":4,"y":0.6789,"lo":0.6598,"hi":0.6974},{"x":5,"y":0.7311,"lo":0.7136,"hi":0.7484},{"x":6,"y":0.7267,"lo":0.7086,"hi":0.7437},{"x":7,"y":0.7343,"lo":0.7171,"hi":0.7519},{"x":8,"y":0.7664,"lo":0.7505,"hi":0.7824},{"x":9,"y":0.7753,"lo":0.7597,"hi":0.7909},{"x":10,"y":0.7715,"lo":0.755,"hi":0.7879},{"x":11,"y":0.7865,"lo":0.7715,"hi":0.8018},{"x":12,"y":0.762,"lo":0.7464,"hi":0.7782},{"x":13,"y":0.7995,"lo":0.7846,"hi":0.8142},{"x":14,"y":0.7886,"lo":0.7731,"hi":0.8046},{"x":15,"y":0.8128,"lo":0.7982,"hi":0.8269},{"x":16,"y":0.8199,"lo":0.8052,"hi":0.8344},{"x":17,"y":0.8242,"lo":0.8101,"hi":0.8384},{"x":18,"y":0.8183,"lo":0.8044,"hi":0.8323},{"x":19,"y":0.824,"lo":0.8098,"hi":0.8378},{"x":20,"y":0.8726,"lo":0.8598,"hi":0.8844},{"x":21,"y":0.9019,"lo":0.8912,"hi":0.9121},{"x":22,"y":0.9166,"lo":0.9068,"hi":0.9259},{"x":23,"y":0.9326,"lo":0.9238,"hi":0.9411},{"x":24,"y":0.94,"lo":0.932,"hi":0.9481},{"x":25,"y":0.9519,"lo":0.9449,"hi":0.9586},{"x":26,"y":0.9628,"lo":0.9567,"hi":0.9688},{"x":27,"y":0.9894,"lo":0.986,"hi":0.9926}],"1":[{"x":0,"y":0.3464,"lo":0.3253,"hi":0.3692},{"x":1,"y":0.3605,"lo":0.3394,"hi":0.384},{"x":2,"y":0.3504,"lo":0.3279,"hi":0.3733},{"x":3,"y":0.36,"lo":0.3387,"hi":0.3842},{"x":4,"y":0.3686,"lo":0.3452,"hi":0.3927},{"x":5,"y":0.3945,"lo":0.3714,"hi":0.4178},{"x":6,"y":0.382,"lo":0.359,"hi":0.4053},{"x":7,"y":0.4099,"lo":0.3862,"hi":0.4334},{"x":8,"y":0.4273,"lo":0.4041,"hi":0.4509},{"x":9,"y":0.4336,"lo":0.4104,"hi":0.4579},{"x":10,"y":0.4366,"lo":0.4128,"hi":0.4602},{"x":11,"y":0.4545,"lo":0.4306,"hi":0.4785},{"x":12,"y":0.4477,"lo":0.4248,"hi":0.4715},{"x":13,"y":0.4632,"lo":0.4399,"hi":0.4865},{"x":14,"y":0.5145,"lo":0.4911,"hi":0.5386},{"x":15,"y":0.5186,"lo":0.4951,"hi":0.5412},{"x":16,"y":0.5113,"lo":0.4887,"hi":0.5328},{"x":17,"y":0.5327,"lo":0.5106,"hi":0.5553},{"x":18,"y":0.5988,"lo":0.5783,"hi":0.6195},{"x":19,"y":0.577,"lo":0.5545,"hi":0.5998},{"x":20,"y":0.7297,"lo":0.7127,"hi":0.7472},{"x":21,"y":0.7593,"lo":0.7408,"hi":0.7765},{"x":22,"y":0.8183,"lo":0.804,"hi":0.8326},{"x":23,"y":0.8574,"lo":0.8437,"hi":0.87},{"x":24,"y":0.881,"lo":0.869,"hi":0.8927},{"x":25,"y":0.8992,"lo":0.8883,"hi":0.9098},{"x":26,"y":0.9228,"lo":0.9129,"hi":0.9321},{"x":27,"y":0.9756,"lo":0.9703,"hi":0.9806}],"2":[{"x":0,"y":0.8359,"lo":0.8211,"hi":0.8504},{"x":1,"y":0.8509,"lo":0.8357,"hi":0.8654},{"x":2,"y":0.8495,"lo":0.8346,"hi":0.8639},{"x":3,"y":0.8435,"lo":0.8291,"hi":0.8573},{"x":4,"y":0.8465,"lo":0.8312,"hi":0.8605},{"x":5,"y":0.8313,"lo":0.8146,"hi":0.8478},{"x":6,"y":0.8365,"lo":0.8212,"hi":0.8511},{"x":7,"y":0.8495,"lo":0.8354,"hi":0.8631},{"x":8,"y":0.8506,"lo":0.8364,"hi":0.8644},{"x":9,"y":0.8623,"lo":0.848,"hi":0.8765},{"x":10,"y":0.8275,"lo":0.8113,"hi":0.8424},{"x":11,"y":0.846,"lo":0.8309,"hi":0.8608},{"x":12,"y":0.853,"lo":0.8383,"hi":0.8673},{"x":13,"y":0.853,"lo":0.8389,"hi":0.8677},{"x":14,"y":0.881,"lo":0.8674,"hi":0.8937},{"x":15,"y":0.8737,"lo":0.8605,"hi":0.8872},{"x":16,"y":0.8816,"lo":0.8686,"hi":0.8946},{"x":17,"y":0.8775,"lo":0.8641,"hi":0.8903},{"x":18,"y":0.8707,"lo":0.8572,"hi":0.8845},{"x":19,"y":0.8669,"lo":0.8512,"hi":0.8816},{"x":20,"y":0.8883,"lo":0.8753,"hi":0.901},{"x":21,"y":0.8794,"lo":0.8646,"hi":0.8933},{"x":22,"y":0.9071,"lo":0.8956,"hi":0.9187},{"x":23,"y":0.9242,"lo":0.9147,"hi":0.9342},{"x":24,"y":0.9237,"lo":0.9132,"hi":0.9333},{"x":25,"y":0.9563,"lo":0.9489,"hi":0.963},{"x":26,"y":0.9584,"lo":0.9508,"hi":0.9649},{"x":27,"y":0.981,"lo":0.9765,"hi":0.9855}],"3":[{"x":0,"y":0.9201,"lo":0.9088,"hi":0.9312},{"x":1,"y":0.9008,"lo":0.8889,"hi":0.9134},{"x":2,"y":0.8824,"lo":0.869,"hi":0.8962},{"x":3,"y":0.9022,"lo":0.89,"hi":0.9141},{"x":4,"y":0.9182,"lo":0.9068,"hi":0.9295},{"x":5,"y":0.8913,"lo":0.8797,"hi":0.9033},{"x":6,"y":0.9033,"lo":0.892,"hi":0.9146},{"x":7,"y":0.9008,"lo":0.8893,"hi":0.9129},{"x":8,"y":0.9188,"lo":0.909,"hi":0.9289},{"x":9,"y":0.9359,"lo":0.9269,"hi":0.9445},{"x":10,"y":0.9234,"lo":0.9135,"hi":0.9332},{"x":11,"y":0.925,"lo":0.9153,"hi":0.9342},{"x":12,"y":0.9315,"lo":0.9224,"hi":0.9407},{"x":13,"y":0.9389,"lo":0.9309,"hi":0.947},{"x":14,"y":0.9237,"lo":0.9116,"hi":0.9351},{"x":15,"y":0.887,"lo":0.873,"hi":0.9002},{"x":16,"y":0.9234,"lo":0.9131,"hi":0.934},{"x":17,"y":0.9468,"lo":0.9384,"hi":0.9548},{"x":18,"y":0.9267,"lo":0.9152,"hi":0.9375},{"x":19,"y":0.9065,"lo":0.8946,"hi":0.9179},{"x":20,"y":0.941,"lo":0.9323,"hi":0.9498},{"x":21,"y":0.9353,"lo":0.9261,"hi":0.9446},{"x":22,"y":0.9443,"lo":0.9359,"hi":0.9524},{"x":23,"y":0.9351,"lo":0.9251,"hi":0.9448},{"x":24,"y":0.9644,"lo":0.958,"hi":0.9706},{"x":25,"y":0.9609,"lo":0.9532,"hi":0.968},{"x":26,"y":0.969,"lo":0.9632,"hi":0.9749},{"x":27,"y":0.984,"lo":0.9797,"hi":0.9879}]}}},"grid":{"state":"pending","rows":[{"model":"next-item_best (original)","variant":"rqkmeans_3codebook_128","label":"RQ-KMeans 3\u00d7128","q":"rqkmeans","depth":3,"width":128,"original":true,"A1":{"est":0.5703,"lo":0.5258,"hi":0.6155},"A3":{"est":0.1754,"lo":0.1471,"hi":0.2043},"H1":{"est":1.3437,"lo":1.1876,"hi":1.5072},"H2a":{"est":0.3982,"lo":0.3234,"hi":0.4747},"H2b":{"est":0.4296,"lo":0.3409,"hi":0.5251},"late":{"est":0.992,"lo":0.9847,"hi":0.9994},"P1":{"est":-27.2553,"lo":-32.3111,"hi":-22.1384},"P2":{"est":-2.1203,"lo":-3.1175,"hi":-1.1524},"N":{"est":-0.0272,"lo":-0.1928,"hi":0.1326},"plain":{"est":-3.9935,"lo":-4.9505,"hi":-3.0657},"hr10":24.02},{"model":"oneoff_rqvae4cb128 (original; not the sweep model)","variant":"rqvae_4codebook_128","label":"RQ-VAE 4\u00d7128","q":"rqvae","depth":4,"width":128,"original":true,"A1":{"est":0.5113,"lo":0.4725,"hi":0.5521},"A3":{"est":0.3564,"lo":0.3131,"hi":0.4016},"H1":{"est":1.036,"lo":0.9151,"hi":1.1516},"H2a":{"est":0.3615,"lo":0.307,"hi":0.4192},"H2b":{"est":0.3712,"lo":0.3095,"hi":0.4384},"late":{"est":0.9807,"lo":0.9735,"hi":0.9878},"P1":{"est":-10.1124,"lo":-14.949,"hi":-5.8195},"P2":{"est":-2.9689,"lo":-3.7849,"hi":-2.1484},"N":{"est":-0.1087,"lo":-0.3077,"hi":0.08},"plain":{"est":-3.2328,"lo":-4.0301,"hi":-2.446},"hr10":14.37}],"pilot":[{"label":"RQ-KMeans 5\u00d7128","rows":64,"k0_exact":128,"k0_n":128,"v1":1.0},{"label":"MQ 3\u00d7128","rows":64,"k0_exact":128,"k0_n":128,"v1":1.0}]},"sources":[{"path":"derived/substrate/exp1_ar_next_item_retrain/check-r20261004-20261006-zcr/estimates.csv","sha256":"770342f531b976d8"},{"path":"derived/representation/exp3_ar_information_map/summary-294711-294712/estimates.csv","sha256":"ef3986f449dfdba5"},{"path":"derived/representation/exp3_ar_information_map/summary-294711-294712/census_summary.csv","sha256":"fa9dc74da25ef813"},{"path":"derived/representation/exp3_ar_information_map/summary-294711-294712/verdict_inputs.json","sha256":"16e217fbad98aa39"}]};
+const NS = "http://www.w3.org/2000/svg";
+const MCOL = { rqkmeans_3codebook_128: "var(--s-rqk)", rqvae_4codebook_128: "var(--s-rqvae)" };
+const QCOL = { rqkmeans: "var(--s-rqk)", rqvae: "var(--s-rqvae)", MQ: "var(--s-mq)" };
+const QLAB = { rqkmeans: "RQ-KMeans", rqvae: "RQ-VAE", MQ: "MQ" };
+const QORD = ["rqkmeans", "rqvae", "MQ"];
+
+function h(tag, attrs = {}, parent, text) {
+  const e = document.createElement(tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function s(tag, attrs = {}, parent, style) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (style) Object.assign(e.style, style);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(parent, x, y, str, attrs = {}) { const t = s("text", { x, y, ...attrs }, parent); t.textContent = str; return t; }
+function lin(d0, d1, r0, r1) { const f = v => r0 + (v - d0) / (d1 - d0) * (r1 - r0); f.inv = p => d0 + (p - r0) / (r1 - r0) * (d1 - d0); return f; }
+function ticks(a, b, n = 5) {
+  const st0 = (b - a) / n, mag = 10 ** Math.floor(Math.log10(st0)), e = st0 / mag;
+  const st = (e >= 7.5 ? 10 : e >= 3.5 ? 5 : e >= 1.5 ? 2 : 1) * mag, out = [];
+  for (let v = Math.ceil(a / st - 1e-9) * st; v <= b + 1e-9; v += st) out.push(+v.toFixed(10));
+  return out;
+}
+const f2 = v => v == null ? "–" : (+v).toFixed(2), f3 = v => v == null ? "–" : (+v).toFixed(3), f1 = v => v == null ? "–" : (+v).toFixed(1);
+const pct = v => v == null ? "–" : (100 * v).toFixed(1) + "%";
+const sgn = (v, d = 2) => v == null ? "–" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(d);
+
+function legend(id, items) {
+  const el = document.getElementById(id); el.textContent = "";
+  for (const it of items) {
+    const sp = h("span", {}, el); const k = h("i", { class: "key " + it.kind }, sp); k.style.setProperty("--c", it.color);
+    sp.appendChild(document.createTextNode(it.label));
+  }
+}
+function table(id, head, rows, right = []) {
+  const wrap = document.getElementById(id); wrap.textContent = "";
+  const t = h("table", {}, wrap), tr = h("tr", {}, h("thead", {}, t)), tb = h("tbody", {}, t);
+  head.forEach((c, i) => h("th", right.includes(i) ? { class: "r" } : {}, tr, c));
+  rows.forEach(r => { const x = h("tr", {}, tb); r.forEach((c, i) => h("td", right.includes(i) ? { class: "r" } : {}, x, c)); });
+}
+
+/* one tooltip per viz host */
+function tipper(host) {
+  let tip = host.querySelector(".tip");
+  if (!tip) { tip = h("div", { class: "tip", role: "status" }, host); tip.hidden = true; }
+  return {
+    show(head, rows, px, py) {
+      tip.textContent = ""; h("div", { class: "h" }, tip, head);
+      for (const r of rows) {
+        const d = h("div", { class: "r" }, tip);
+        if (r.color) { const k = h("i", { class: "key " + (r.kind || "line") }, d); k.style.setProperty("--c", r.color); }
+        h("b", {}, d, r.value); if (r.name) h("span", { class: "n" }, d, r.name);
+      }
+      tip.hidden = false;
+      const W = host.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+      let x = px + 14; if (x + tw > W) x = Math.max(0, px - tw - 14);
+      let y = py - th - 10; if (y < 0) y = py + 14;
+      tip.style.left = x + "px"; tip.style.top = y + "px";
+    },
+    hide() { tip.hidden = true; }
+  };
+}
+const renders = [];
+function responsive(host, draw) {
+  let w = 0;
+  const go = () => { const nw = host.clientWidth; if (nw && nw !== w) { w = nw; draw(nw); } };
+  new ResizeObserver(go).observe(host); go();
+}
+
+/* line chart: series [{name,color,dash,width,points:[{x,y,lo,hi}],band}], refs [{y,color,dash,label}] */
+function lineChart(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const H = o.h || 250, m = { l: 46, r: o.endLabels ? 104 : 14, t: o.title ? 26 : 10, b: 36 };
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || o.title || "line chart" });
+    host.prepend(svg);
+    const allx = [...new Set(o.series.flatMap(se => se.points.map(p => p.x)))].sort((a, b) => a - b);
+    const x = lin(o.x ? o.x[0] : allx[0], o.x ? o.x[1] : allx[allx.length - 1], m.l, W - m.r);
+    const y = lin(o.y[0], o.y[1], H - m.b, m.t);
+    if (o.title) txt(svg, m.l, 15, o.title, { class: "title" });
+    for (const t of ticks(o.y[0], o.y[1], o.yTicks || 5)) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }, svg, { stroke: "var(--grid)", strokeWidth: 1 });
+      txt(svg, m.l - 7, y(t) + 4, o.yFmt ? o.yFmt(t) : t, { "text-anchor": "end" });
+    }
+    for (const t of ticks(x.inv(m.l), x.inv(W - m.r), Math.max(3, Math.floor((W - m.l - m.r) / 70)))) {
+      if (!Number.isInteger(t)) continue;
+      txt(svg, x(t), H - m.b + 16, t, { "text-anchor": "middle" });
+    }
+    s("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b }, svg, { stroke: "var(--axis)", strokeWidth: 1 });
+    if (o.xLabel) txt(svg, (m.l + W - m.r) / 2, H - 4, o.xLabel, { "text-anchor": "middle" });
+    if (o.yLabel) txt(svg, 12, (m.t + H - m.b) / 2, o.yLabel, { "text-anchor": "middle", transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` });
+    for (const r of o.refs || []) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(r.y), y2: y(r.y) }, svg, { stroke: r.color, strokeWidth: r.width || 1.4, strokeDasharray: r.dash || "2 3" });
+    }
+    for (const se of o.series) {
+      const pts = se.points.filter(p => p.y != null);
+      if (se.band && pts.every(p => p.lo != null)) {
+        const d = pts.map((p, i) => `${i ? "L" : "M"}${x(p.x)},${y(p.hi)}`).join("") + pts.slice().reverse().map(p => `L${x(p.x)},${y(p.lo)}`).join("") + "Z";
+        s("path", { d }, svg, { fill: se.color, fillOpacity: "var(--band-op)", stroke: "none" });
+      }
+      s("path", { d: pts.map((p, i) => `${i ? "L" : "M"}${x(p.x)},${y(p.y)}`).join("") }, svg,
+        { fill: "none", stroke: se.color, strokeWidth: se.width || 2, strokeDasharray: se.dash || "", strokeLinejoin: "round", strokeLinecap: "round" });
+    }
+    if (o.endLabels) {
+      const ends = o.series.filter(se => se.label !== false).map(se => { const pp = se.points.filter(q => q.y != null), p = pp[pp.length - 1]; return { se, y: y(p.y) }; })
+        .sort((a, b) => a.y - b.y);
+      for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+      for (const e of ends) {
+        s("line", { x1: W - m.r + 6, x2: W - m.r + 16, y1: e.y, y2: e.y }, svg, { stroke: e.se.color, strokeWidth: 2, strokeDasharray: e.se.dash || "" });
+        txt(svg, W - m.r + 20, e.y + 4, e.se.short || e.se.name, { class: "lab" });
+      }
+    }
+    // crosshair + tooltip
+    const cross = s("line", { y1: m.t, y2: H - m.b }, svg, { stroke: "var(--axis)", strokeWidth: 1, visibility: "hidden" });
+    const dots = o.series.map(se => s("circle", { r: 4 }, svg, { fill: se.color, stroke: "var(--surface)", strokeWidth: 2, visibility: "hidden" }));
+    const hit = s("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, class: "hit", tabindex: 0 }, svg);
+    const tp = tipper(host); let idx = -1;
+    const at = i => {
+      idx = Math.max(0, Math.min(allx.length - 1, i)); const xv = allx[idx];
+      cross.setAttribute("x1", x(xv)); cross.setAttribute("x2", x(xv)); cross.style.visibility = "visible";
+      const rows = [];
+      o.series.forEach((se, k) => {
+        const p = se.points.find(q => q.x === xv);
+        if (!p || p.y == null) { dots[k].style.visibility = "hidden"; return; }
+        dots[k].setAttribute("cx", x(xv)); dots[k].setAttribute("cy", y(p.y)); dots[k].style.visibility = "visible";
+        rows.push({ color: se.color, kind: se.dash ? "dash" : "line", value: (o.fmt || f3)(p.y) + (p.lo != null && o.ci !== false ? `  [${(o.fmt || f3)(p.lo)}, ${(o.fmt || f3)(p.hi)}]` : ""), name: se.name });
+      });
+      (o.refs || []).filter(r => r.label).forEach(r => rows.push({ color: r.color, kind: "dash", value: (o.fmt || f3)(r.y), name: r.label }));
+      const sc = host.clientWidth / W;
+      tp.show((o.xName || "layer") + " " + xv, rows, x(xv) * sc, m.t * sc + 20);
+    };
+    const off = () => { cross.style.visibility = "hidden"; dots.forEach(d => d.style.visibility = "hidden"); tp.hide(); };
+    hit.addEventListener("pointermove", ev => {
+      const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width, xv = x.inv(px);
+      let best = 0; allx.forEach((v, i) => { if (Math.abs(v - xv) < Math.abs(allx[best] - xv)) best = i; }); at(best);
+    });
+    hit.addEventListener("pointerleave", off); hit.addEventListener("blur", off);
+    hit.addEventListener("focus", () => at(idx < 0 ? allx.length - 1 : idx));
+    hit.addEventListener("keydown", ev => { if (ev.key === "ArrowLeft") { at(idx - 1); ev.preventDefault(); } if (ev.key === "ArrowRight") { at(idx + 1); ev.preventDefault(); } });
+  });
+}
+
+/* forest / range rows: rows [{label, tag, marks:[{est,lo,hi,color,hollow,name}]}] */
+function forest(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const narrow = W < 520, lw = o.labelW ? (narrow ? o.labelW * 0.8 : o.labelW) : (narrow ? 112 : 150), tagW = o.tags ? (narrow ? 58 : 70) : 0;
+    const rh = o.rowH || 26, m = { l: lw, r: 14 + tagW, t: 8, b: 36 }, H = m.t + m.b + rh * o.rows.length;
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "interval chart" }); host.prepend(svg);
+    const vals = o.rows.flatMap(r => r.marks.flatMap(k => [k.lo, k.hi, k.est])).filter(v => v != null).concat(o.band || [], o.ref != null ? [o.ref] : []);
+    let lo = o.x ? o.x[0] : Math.min(...vals), hi = o.x ? o.x[1] : Math.max(...vals); const pad = (hi - lo) * 0.06; if (!o.x) { lo -= pad; hi += pad; }
+    const x = lin(lo, hi, m.l, W - m.r);
+    for (const t of ticks(lo, hi, Math.max(3, Math.floor((W - m.l - m.r) / 80)))) {
+      s("line", { x1: x(t), x2: x(t), y1: m.t, y2: H - m.b }, svg, { stroke: "var(--grid)", strokeWidth: 1 });
+      txt(svg, x(t), H - m.b + 16, (o.tfmt || (v => v))(t), { "text-anchor": "middle" });
+    }
+    if (o.band) s("rect", { x: x(o.band[0]), y: m.t, width: x(o.band[1]) - x(o.band[0]), height: H - m.t - m.b }, svg, { fill: "var(--ink)", fillOpacity: 0.07 });
+    if (o.ref != null) s("line", { x1: x(o.ref), x2: x(o.ref), y1: m.t, y2: H - m.b }, svg, { stroke: "var(--axis)", strokeWidth: 1.4 });
+    if (o.xLabel) txt(svg, (m.l + W - m.r) / 2, H - 4, o.xLabel, { "text-anchor": "middle" });
+    const tp = tipper(host);
+    o.rows.forEach((r, i) => {
+      const cy = m.t + rh * i + rh / 2;
+      const g = s("g", { tabindex: 0, role: "listitem", "aria-label": r.label }, svg);
+      const bg = s("rect", { x: 0, y: m.t + rh * i, width: W, height: rh, class: "row-hit" }, g);
+      if (r.sep) s("line", { x1: 0, x2: W, y1: m.t + rh * i, y2: m.t + rh * i }, svg, { stroke: "var(--rule)", strokeWidth: 1 });
+      txt(g, lw - 10, cy + 4, r.label, { "text-anchor": "end", class: "lab" });
+      if (r.tag) { const t = txt(g, W - tagW + 6, cy + 4, r.tag, {}); t.style.fill = r.tagColor || "var(--muted)"; t.style.fontFamily = "var(--mono)"; t.style.fontSize = "11px"; }
+      const n = r.marks.length;
+      r.marks.forEach((k, j) => {
+        if (k.est == null) return;
+        const yy = cy + (n > 1 ? (j - (n - 1) / 2) * Math.min(9, (rh - 6) / n) : 0);
+        if (k.lo != null) s("line", { x1: x(k.lo), x2: x(k.hi), y1: yy, y2: yy }, g, { stroke: k.color, strokeWidth: 2, strokeLinecap: "round" });
+        s(k.square ? "rect" : "circle", k.square ? { x: x(k.est) - 4.5, y: yy - 4.5, width: 9, height: 9 } : { cx: x(k.est), cy: yy, r: 4.5 }, g,
+          { fill: k.hollow ? "var(--surface)" : k.color, stroke: k.hollow ? k.color : "var(--surface)", strokeWidth: k.hollow ? 2 : 1.5 });
+      });
+      const show = ev => {
+        bg.classList.add("on");
+        const rows = r.marks.filter(k => k.est != null).map(k => ({ color: k.color, kind: k.hollow ? "ring" : "dot", value: o.fmt(k.est) + (k.lo != null ? `  [${o.fmt(k.lo)}, ${o.fmt(k.hi)}]` : ""), name: k.name || "" }));
+        if (r.extra) r.extra.forEach(e => rows.push({ value: e }));
+        const sc = host.clientWidth / W;
+        tp.show(r.label, rows, (ev && ev.clientX != null ? ev.clientX - svg.getBoundingClientRect().left : x(r.marks[0].est ?? lo) * sc), cy * sc);
+      };
+      g.addEventListener("pointermove", show); g.addEventListener("focus", () => show());
+      g.addEventListener("pointerleave", () => { bg.classList.remove("on"); tp.hide(); }); g.addEventListener("blur", () => { bg.classList.remove("on"); tp.hide(); });
+    });
+  });
+}
+
+/* scatter with y = x reference */
+function scatter(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const H = Math.min(320, Math.max(240, W * 0.72)), m = { l: 46, r: 14, t: 10, b: 38 };
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria }); host.prepend(svg);
+    const x = lin(o.d[0], o.d[1], m.l, W - m.r), y = lin(o.d[0], o.d[1], H - m.b, m.t);
+    for (const t of ticks(o.d[0], o.d[1], 5)) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }, svg, { stroke: "var(--grid)" });
+      txt(svg, m.l - 7, y(t) + 4, t, { "text-anchor": "end" }); txt(svg, x(t), H - m.b + 16, t, { "text-anchor": "middle" });
+    }
+    s("line", { x1: x(o.d[0]), y1: y(o.d[0]), x2: x(o.d[1]), y2: y(o.d[1]) }, svg, { stroke: "var(--axis)", strokeDasharray: "4 4", strokeWidth: 1.2 });
+    txt(svg, (m.l + W - m.r) / 2, H - 4, o.xLabel, { "text-anchor": "middle" });
+    txt(svg, 12, (m.t + H - m.b) / 2, o.yLabel, { "text-anchor": "middle", transform: `rotate(-90 12 ${(m.t + H - m.b) / 2})` });
+    const tp = tipper(host);
+    for (const p of o.points) {
+      const g = s("g", { tabindex: 0 }, svg);
+      s(p.square ? "rect" : "circle", p.square ? { x: x(p.x) - 4.5, y: y(p.y) - 4.5, width: 9, height: 9 } : { cx: x(p.x), cy: y(p.y), r: 4.5 }, g,
+        { fill: p.hollow ? "var(--surface)" : p.color, stroke: p.hollow ? p.color : "var(--surface)", strokeWidth: p.hollow ? 2 : 1.5 });
+      s("circle", { cx: x(p.x), cy: y(p.y), r: 12 }, g, { fill: "transparent" });
+      const show = () => { const sc = host.clientWidth / W; tp.show(p.label, p.rows, x(p.x) * sc, y(p.y) * sc); };
+      g.addEventListener("pointerenter", show); g.addEventListener("focus", show);
+      g.addEventListener("pointerleave", () => tp.hide()); g.addEventListener("blur", () => tp.hide());
+    }
+  });
+}
+
+/* grouped bars: cats [{label, values:[v...], extra}], series [{name,color,hollow}] */
+function bars(host, o) {
+  responsive(host, W => {
+    host.querySelector("svg")?.remove();
+    const H = 270, m = { l: 46, r: 10, t: 18, b: 54 };
+    const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria }); host.prepend(svg);
+    const y = lin(0, o.ymax, H - m.b, m.t), cw = (W - m.l - m.r) / o.cats.length, ns = o.series.length;
+    const bw = Math.min(34, (cw - 18) / ns);
+    for (const t of ticks(0, o.ymax, 5)) {
+      s("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }, svg, { stroke: "var(--grid)" });
+      txt(svg, m.l - 7, y(t) + 4, t + (o.unit || ""), { "text-anchor": "end" });
+    }
+    const tp = tipper(host);
+    o.cats.forEach((c, i) => {
+      const cx = m.l + cw * i + cw / 2, x0 = cx - (bw * ns + 2 * (ns - 1)) / 2;
+      const g = s("g", { tabindex: 0 }, svg);
+      s("rect", { x: m.l + cw * i, y: m.t, width: cw, height: H - m.t - m.b, class: "row-hit" }, g);
+      c.values.forEach((v, j) => {
+        const bx = x0 + j * (bw + 2), top = y(v), base = y(0), r = Math.min(4, bw / 2);
+        const d = `M${bx},${base}L${bx},${top + r}Q${bx},${top} ${bx + r},${top}L${bx + bw - r},${top}Q${bx + bw},${top} ${bx + bw},${top + r}L${bx + bw},${base}Z`;
+        const se = o.series[j];
+        s("path", { d }, g, se.hollow ? { fill: "var(--surface-2)", stroke: se.color, strokeWidth: 1.6 } : { fill: se.color, stroke: "none" });
+        txt(g, bx + bw / 2, top - 5, v.toFixed(1), { "text-anchor": "middle", class: "lab" }).style.fontSize = "11px";
+      });
+      const words = c.label.split(" ");
+      txt(svg, cx, H - m.b + 17, words[0], { "text-anchor": "middle", class: "lab" });
+      txt(svg, cx, H - m.b + 32, words.slice(1).join(" "), { "text-anchor": "middle" });
+      if (c.sub) { const t = txt(svg, cx, H - m.b + 46, c.sub, { "text-anchor": "middle" }); t.style.fill = "var(--crit-ink)"; t.style.fontSize = "10.5px"; }
+      const show = () => { const sc = host.clientWidth / W; tp.show(c.label, o.series.map((se, j) => ({ color: se.color, kind: se.hollow ? "hollow" : "rect", value: c.values[j].toFixed(2) + (o.unit || ""), name: se.name })).concat((c.extra || []).map(e => ({ value: e }))), cx * sc, y(Math.max(...c.values)) * sc); };
+      g.addEventListener("pointerenter", show); g.addEventListener("focus", show);
+      g.addEventListener("pointerleave", () => tp.hide()); g.addEventListener("blur", () => tp.hide());
+    });
+    s("line", { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0) }, svg, { stroke: "var(--axis)" });
+  });
+}
+
+/* ------------------------------------------------------------------ page */
+const qsort = (a, b) => QORD.indexOf(a.q) - QORD.indexOf(b.q) || a.depth - b.depth || a.width - b.width;
+const ML = D.models;
+
+function header() {
+  document.getElementById("gen").textContent = "compiled " + D.generated;
+  const acc = D.acceptance, nAcc = acc.filter(a => a.accepted).length, g = D.grid;
+  const st = document.getElementById("status");
+  const card = (k, chip, cls, v) => { const c = h("div", { class: "stat" }, st); h("span", { class: "chip " + cls }, c, chip); h("div", { class: "k" }, c, k); h("div", { class: "v" }, c, v); };
+  card("Layer map (representation/exp3)", "complete", "good", "Captures, SAEs, lenses and census for the two original checkpoints. Summary job 300844.");
+  card("Retrain acceptance (substrate/exp1)", "complete", "good", `${nAcc} of ${acc.length} retrained models accepted; ${D.zcr.length} collision-free (ZCR) models trained.`);
+  if (g.state === "complete") card("Copy grid (controlled/exp11)", "complete", "good", `12 models; job ${D.grid_job}.`);
+  else card("Copy grid (controlled/exp11)", "queued", "wait", `Job ${D.grid_job}, 12 models on 4 GPUs, about 7 hours once it starts. The 2-model pilot passed every check.`);
+  const fs = document.getElementById("findings"), I = D.info, ms = Object.keys(ML);
+  const item = (href, chipCls, chipTxt, title, paras, caveat) => {
+    const l = h("li", {}, fs), t = h("div", { class: "t" }, l);
+    h("a", { href }, t, title); h("span", { class: "chip " + chipCls }, t, chipTxt);
+    for (const x of paras) h("p", {}, l, x);
+    if (caveat) h("p", { class: "caveat" }, l, caveat);
+  };
+  const d4 = sub => ms.map(m => I.d4.find(d => d.model === m && d.subset === sub).median.toFixed(0)).join(" / ");
+  const r1 = L => ms.map(m => pct(I.decoders[m].r1_at_R0.exact.find(p => p.x === L).y)).join(" / ");
+  item("#layers", "good", "show", "Layer map: strongest new result", [
+    `Repeat recommendations settle earlier. The full recommendation is fixed from layer ${d4("copy answer")} when the model repeats the most recent item, and from layer ${d4("non-copy answer")} when it recommends another item (RQ-KMeans / RQ-VAE, medians).`,
+    "Items are assembled by layer 2: every history item's SID can be read from its last token, and the item before it is best read at layers 12–14.",
+    `At the answer start, the most recent item fades as the recommendation forms. It can be read there in ${r1(0)} of rows at layer 0 and ${r1(27)} at layer 27.`,
+    "The true next item cannot be read at the answer start beyond the rule “recommend the most recent item” (+2 to +3 points)."],
+    "Present as observational. Of the six predictions recorded before the run, two failed in both models (the recommendation is readable earlier than expected, and features for non-repeat recommendations are not rare early) and one failed for RQ-VAE (the true next item decodes 3.3 points above the rule). The planning-ahead reading does not hold.");
+  const fail = acc.filter(a => !a.accepted);
+  item("#retrain", "good", "show", "Retrain acceptance: methods result", [
+    `${nAcc} of ${acc.length} retrained models reproduce the deleted ones, and the ranking of the 18 maps is preserved (Spearman ρ = ${D.acceptance_rho.toFixed(2)}). The ${fail.length} failures miss in both directions (${fail.filter(a => a.d > 0).length} higher, ${fail.filter(a => a.d < 0).length} lower).`,
+    "This lets the experiments run on most of the grid instead of two models. It also replaces the RQ-VAE 4×128 model behind last week's results, which was not the sweep's model, with an accepted retrained one."],
+    "A statement about the substrate, not about how the models work.");
+  const z = D.zcr.find(r => r.variant === "rqkmeans_3codebook_128");
+  item("#zcr", "part", "not yet", "Collision-free (ZCR) scores", [
+    `Hit@10 drops, e.g. from ${z.native_hr.toFixed(1)}% to ${z.zcr_hr.toFixed(1)}% at RQ-KMeans 3×128. SID-level scoring credits any item that shares the listed SID, so the gap means nothing until it is scored per item.`]);
+  if (D.grid.state === "complete") {
+    item("#grid", "good", "show", "Copy grid on 12 maps", ["Results below; see the counts of maps that show each effect."]);
+  } else {
+    item("#grid", "wait", "coming", "Copy grid: this week's headline once it runs", [
+      `Job ${D.grid_job} tests whether last week's copy findings hold on 12 maps instead of 2, and how much they move when the same map is trained twice. It is waiting for GPUs.`]);
+  }
+}
+
+function retrain() {
+  const acc = D.acceptance.slice().sort(qsort);
+  legend("lg-acc", QORD.map(q => ({ kind: "dot", color: QCOL[q], label: QLAB[q] })).concat([{ kind: "band", color: "var(--ink)", label: "acceptance limit ±1.5 pts" }]));
+  forest(document.getElementById("v-acc"), {
+    rows: acc.map((a, i) => ({ label: a.label, sep: i > 0 && acc[i - 1].q !== a.q, tag: a.accepted ? "" : "failed", tagColor: "var(--crit-ink)",
+      marks: [{ est: a.d, lo: a.lo, hi: a.hi, color: QCOL[a.q], name: "Δ Hit@10 (pts)" }],
+      extra: [`ΔNDCG@10 ${sgn(a.d_ndcg)} pts`, `Hit@10 ${a.hr_new.toFixed(2)}% vs archived ${a.hr_old.toFixed(2)}%`, a.accepted ? "accepted" : "failed acceptance"] })),
+    band: [-1.5, 1.5], ref: 0, fmt: v => sgn(v), tfmt: v => (v > 0 ? "+" : "") + v, xLabel: "Δ Hit@10, retrained − archived (points)", tags: true, aria: "Change in Hit@10 per map with acceptance band"
+  });
+  table("t-acc", ["Map", "Hit@10 retrained", "Hit@10 archived", "Δ Hit@10 [95% CI]", "Δ NDCG@10", "Top-1 agreement", "Train (min, 4 GPUs)", "Accepted"],
+    acc.map(a => [a.label, a.hr_new.toFixed(2) + "%", a.hr_old.toFixed(2) + "%", `${sgn(a.d)} [${sgn(a.lo)}, ${sgn(a.hi)}]`, sgn(a.d_ndcg), f3(a.top1), f1(a.train_min), a.accepted ? "yes" : "no"]), [1, 2, 3, 4, 5, 6]);
+  legend("lg-sc", QORD.map(q => ({ kind: "dot", color: QCOL[q], label: QLAB[q] })).concat([{ kind: "ring", color: "var(--ink-2)", label: "failed acceptance" }, { kind: "rect", color: "var(--ink-2)", label: "width 512 (square)" }]));
+  scatter(document.getElementById("v-sc"), {
+    d: [10, 26], xLabel: "archived Hit@10 (%)", yLabel: "retrained Hit@10 (%)", aria: "Retrained vs archived Hit@10",
+    points: acc.map(a => ({ x: a.hr_old, y: a.hr_new, color: QCOL[a.q], hollow: !a.accepted, square: a.width === 512, label: a.label,
+      rows: [{ value: `${a.hr_new.toFixed(2)}%`, name: "retrained" }, { value: `${a.hr_old.toFixed(2)}%`, name: "archived" }, { value: a.accepted ? "accepted" : "failed" }] }))
+  });
+  const n = document.getElementById("acc-notes");
+  const fail = acc.filter(a => !a.accepted);
+  const add = (b, t) => { const l = h("li", {}, n); h("b", {}, l, b); l.appendChild(document.createTextNode(" " + t)); };
+  add("Both directions.", `Of the ${fail.length} failures, ${fail.filter(a => a.d > 0).length} score higher than the archived model and ${fail.filter(a => a.d < 0).length} lower. A recipe error would push them one way.`);
+  add("All MQ or width 512.", fail.map(a => a.label).join(", ") + ". The deleted models were themselves single training runs, so the archived score carries the same run-to-run noise.");
+  add("Calibration cell.", "RQ-KMeans 3×128, whose original weights survive, moves by +0.19 points [−0.51, +0.90], although its top-1 recommendation agrees with the original model in only 57% of rows.");
+  add("What follows.", "Only the 12 accepted models enter the copy grid. Adding the six others would need a protocol amendment and would be reported as a separate set.");
+}
+
+function zcrSec() {
+  const z = D.zcr.slice().sort((a, b) => a.width - b.width || a.label.localeCompare(b.label));
+  legend("lg-zcr", [{ kind: "rect", color: "var(--s-rqk)", label: "native map" }, { kind: "hollow", color: "var(--s-rqk)", label: "ZCR map (no shared SIDs)" }]);
+  bars(document.getElementById("v-zcr"), {
+    ymax: 30, unit: "%", aria: "Hit@10 native vs ZCR",
+    series: [{ name: "native", color: "var(--s-rqk)" }, { name: "ZCR", color: "var(--s-rqk)", hollow: true }],
+    cats: z.map(r => ({ label: r.label, sub: r.native_accepted ? "" : "native not accepted", values: [r.native_hr, r.zcr_hr],
+      extra: [`strict exact-SID: ${r.native_strict.toFixed(2)}% vs ${r.zcr_strict.toFixed(2)}%`] }))
+  });
+  table("t-zcr", ["Map", "Native Hit@10", "ZCR Hit@10", "Native strict Hit@10", "ZCR strict Hit@10", "Native NDCG@10", "ZCR NDCG@10", "Native accepted"],
+    z.map(r => [r.label, r.native_hr.toFixed(2) + "%", r.zcr_hr.toFixed(2) + "%", r.native_strict.toFixed(2) + "%", r.zcr_strict.toFixed(2) + "%", r.native_ndcg.toFixed(2) + "%", r.zcr_ndcg.toFixed(2) + "%", r.native_accepted ? "yes" : "no"]), [1, 2, 3, 4, 5, 6]);
+}
+
+function layers() {
+  const I = D.info, ms = Object.keys(ML);
+  legend("lg-lens", ms.flatMap(m => [{ kind: "line", color: MCOL[m], label: ML[m] + ", tuned lens" }, { kind: "dash", color: MCOL[m], label: ML[m] + ", logit lens" }]));
+  lineChart(document.getElementById("v-lens"), {
+    h: 290, y: [0, 1], yFmt: v => v.toFixed(1), xLabel: "layer", yLabel: "agreement with the model's answer", endLabels: true, aria: "Whole-answer lens agreement by layer",
+    series: ms.flatMap(m => [{ name: ML[m] + " tuned", short: ML[m].split(" ")[0] + " tuned", color: MCOL[m], points: I.lens[m].tuned, band: true },
+                             { name: ML[m] + " logit", short: ML[m].split(" ")[0] + " logit", color: MCOL[m], dash: "5 4", width: 1.6, points: I.lens[m].logit }])
+  });
+  const Ls = I.lens[ms[0]].tuned.map(p => p.x);
+  table("t-lens", ["Layer"].concat(ms.flatMap(m => [ML[m] + " tuned", ML[m] + " logit"])),
+    Ls.map(L => [String(L)].concat(ms.flatMap(m => [f3(I.lens[m].tuned.find(p => p.x === L)?.y), f3(I.lens[m].logit.find(p => p.x === L)?.y)]))), [1, 2, 3, 4]);
+
+  const order = ["copy answer", "non-copy answer", "repeat target", "new target", "all"];
+  const lab = { "copy answer": "Repeats most recent item", "non-copy answer": "Recommends another item", "repeat target": "True next item in history", "new target": "True next item not in history", "all": "All rows" };
+  legend("lg-d4", ms.map(m => ({ kind: "dot", color: MCOL[m], label: ML[m] })));
+  forest(document.getElementById("v-d4"), {
+    x: [0, 27], ref: null, fmt: v => v.toFixed(0), tfmt: v => v, xLabel: "first stable layer (median, middle half of rows)", rowH: 34, labelW: 200, aria: "First stable layer by row type",
+    rows: order.map(sub => ({ label: lab[sub], marks: ms.map(m => { const r = I.d4.find(d => d.model === m && d.subset === sub); return { est: r.median, lo: r.q1, hi: r.q3, color: MCOL[m], name: ML[m] }; }),
+      extra: ms.map(m => { const r = I.d4.find(d => d.model === m && d.subset === sub); return `${ML[m]}: n = ${r.n}, never stable ${(100 * r.never).toFixed(1)}%`; }) }))
+  });
+  table("t-d4", ["Rows", "Model", "Median", "IQR", "n", "Never stable"], order.flatMap(sub => ms.map(m => { const r = I.d4.find(d => d.model === m && d.subset === sub); return [lab[sub], ML[m], f1(r.median), `${f1(r.q1)}–${f1(r.q3)}`, String(r.n), (100 * r.never).toFixed(1) + "%"]; })), [2, 4, 5]);
+
+  const tasks = [["item_at_last", "Item SID · from its last token"], ["item_at_first", "Item SID · from its first token"], ["prev_item_at_last", "Previous item · from last token"],
+                 ["r1_at_R0", "Most recent item · answer start"], ["answer_at_R0", "Recommendation · answer start"], ["golden_at_R0", "True next item · answer start"]];
+  legend("lg-dec", ms.map(m => ({ kind: "line", color: MCOL[m], label: ML[m] })).concat([{ kind: "dash", color: "var(--ink-2)", label: "simple rule (dotted, model colour)" }, { kind: "line", color: "var(--s-ctx)", label: "input-free decoder" }]));
+  const host = document.getElementById("v-dec");
+  for (const [task, title] of tasks) {
+    const div = h("div", { class: "viz" }, host);
+    const series = ms.map(m => ({ name: ML[m], color: MCOL[m], points: I.decoders[m][task].exact, band: true }));
+    if (task === "answer_at_R0") ms.forEach(m => series.push({ name: ML[m] + ", non-repeats", color: MCOL[m], dash: "4 3", width: 1.3, points: I.decoders[m][task].noncopy }));
+    const refs = [];
+    ms.forEach(m => { const d = I.decoders[m][task]; if (d.rule != null) refs.push({ y: d.rule, color: MCOL[m], dash: "1.5 3", width: 1.6, label: ML[m] + ": rule, " + ({ "copy rule": "recommend the most recent item", "mode-given-digit0 rule": "most common SID given digit 1" }[d.rule_name] || d.rule_name) });
+                      if (d.prior != null) refs.push({ y: d.prior, color: "var(--s-ctx)", dash: "", width: 1.2, label: ML[m] + ": input-free" }); });
+    lineChart(div, { h: 200, title, y: [0, 1], yTicks: 4, yFmt: v => v.toFixed(1), x: [0, 27], series, refs, aria: title });
+  }
+  const at = [0, 10, 20, 26];
+  table("t-dec", ["Task", "Model"].concat(at.map(L => "L" + L), ["Rule", "Input-free"]),
+    tasks.flatMap(([task, title]) => ms.map(m => { const d = I.decoders[m][task]; return [title, ML[m]].concat(at.map(L => f3(d.exact.find(p => p.x === L)?.y)), [f3(d.rule), f3(d.prior)]); })), [2, 3, 4, 5, 6, 7]);
+
+  legend("lg-cen1", ms.flatMap(m => [{ kind: "line", color: MCOL[m], label: ML[m] + ": track most recent item" }, { kind: "dash", color: MCOL[m], label: ML[m] + ": track recommendation" }]));
+  legend("lg-cen2", ms.flatMap(m => [{ kind: "line", color: MCOL[m], label: ML[m] + ": track recommendation" }, { kind: "dash", color: MCOL[m], label: ML[m] + ": … also on non-repeats" }]));
+  lineChart(document.getElementById("v-cen1"), {
+    h: 230, title: "Share of live features", y: [0, 0.6], yTicks: 3, yFmt: v => Math.round(v * 100) + "%", fmt: v => (100 * v).toFixed(1) + "%", ci: false, x: [0, 27], aria: "Share of features by label",
+    series: ms.flatMap(m => [{ name: ML[m] + ": most recent item", color: MCOL[m], points: I.census[m].map(c => ({ x: c.x, y: c.copy })) },
+                             { name: ML[m] + ": recommendation", color: MCOL[m], dash: "5 4", width: 1.6, points: I.census[m].map(c => ({ x: c.x, y: c.answer })) }])
+  });
+  lineChart(document.getElementById("v-cen2"), {
+    h: 230, title: "Features tracking the recommendation (count)", y: [0, 100], yTicks: 4, yFmt: v => v, fmt: v => String(v), ci: false, x: [0, 27], aria: "Answer feature counts",
+    series: ms.flatMap(m => [{ name: ML[m] + ": all", color: MCOL[m], points: I.census[m].map(c => ({ x: c.x, y: c.n_answer })) },
+                             { name: ML[m] + ": also on non-repeats", color: MCOL[m], dash: "5 4", width: 1.6, points: I.census[m].map(c => ({ x: c.x, y: c.n_beyond })) }])
+  });
+  table("t-cen", ["Layer", "Model", "Live features", "Track most recent item", "Track recommendation", "Unexplained", "Recommendation features", "… also on non-repeats"],
+    I.census[ms[0]].map(c => c.x).flatMap(L => ms.map(m => { const c = I.census[m].find(q => q.x === L); return [String(L), ML[m], String(c.n_live), pct(c.copy), pct(c.answer), pct(c.unexplained), String(c.n_answer), String(c.n_beyond)]; })), [0, 2, 3, 4, 5, 6, 7]);
+  document.getElementById("gg").textContent = ms.map(m => pct(I.headline[m].greedy_golden)).join(" / ");
+  document.getElementById("gb").textContent = ms.map(m => pct(I.headline[m].greedy_beam)).join(" / ");
+}
+
+function gridSec() {
+  const G = D.grid, body = document.getElementById("grid-body");
+  const est = (r, k, d = 2) => r[k] ? `${sgn(r[k].est, d)} [${sgn(r[k].lo, d)}, ${sgn(r[k].hi, d)}]` : "–";
+  const defs = [["A1", "A1: replace the most recent item", "cost to the golden first digit (nats)", 2], ["H1", "H1: prefix-matched copying (valid)", "match − non-match (nats)", 2],
+                ["H2b", "H2b: single-edge knockout vs control edge (valid)", "nats", 2], ["late", "Share of the edge effect from layers 14–27 (valid)", "K5 / K1", 2],
+                ["P1", "P1: copy block in beam search, true next item already in history", "Δ HR@10 (points)", 1], ["P2", "P2: copy block in beam search, true next item not in history", "Δ HR@10 (points)", 1]];
+  if (G.state !== "complete") {
+    const p = h("p", { class: "note" }, body);
+    p.textContent = `Pending. Job ${D.grid_job} is queued on the CIAI cluster: 4 tasks × 3 models, about 7 hours once GPUs free up. This section fills in when the run finishes and the page is rebuilt.`;
+    const f1_ = h("figure", {}, body); const c1 = h("div", { class: "cap" }, f1_); h("h3", {}, c1, "Pilot checks (64 rows per stage)");
+    h("p", {}, c1, "Before the full run, the whole pipeline ran on two models. The edge-knockout no-op controls must leave every logit bit-identical, and the beam-search baseline must reproduce the retrained model's own evaluation lists.");
+    const w1 = h("div", { class: "tablewrap" }, f1_); w1.id = "t-pilot";
+    table("t-pilot", ["Model", "No-op knockouts bit-exact", "Baseline lists reproduced"], G.pilot.map(r => [r.label, `${r.k0_exact} / ${r.k0_n}`, `${Math.round(r.v1 * r.rows)} / ${r.rows}`]), [1, 2]);
+    const f2_ = h("figure", {}, body); const c2 = h("div", { class: "cap" }, f2_); h("h3", {}, c2, "What the grid will be compared with");
+    h("p", {}, c2, "The same estimates on the two original checkpoints, recomputed with the grid's own analysis code and bootstrap draws (they match the published values).");
+    const w2 = h("div", { class: "tablewrap" }, f2_); w2.id = "t-ref";
+    table("t-ref", ["Checkpoint", "A1 (nats)", "A3", "H1 valid", "H2a valid", "H2b valid", "Late share", "P1 (pts)", "P2 (pts)", "Matched control (pts)", "HR@10"],
+      G.rows.map(r => [r.model, est(r, "A1"), est(r, "A3"), est(r, "H1"), est(r, "H2a"), est(r, "H2b"), est(r, "late"), est(r, "P1", 1), est(r, "P2", 1), est(r, "N", 2), r.hr10 == null ? "–" : r.hr10.toFixed(1) + "%"]));
+    return;
+  }
+  document.getElementById("grid-h").textContent = "Copy estimates on the 12 accepted models";
+  const gc = document.getElementById("grid-chip"); gc.className = "chip good"; gc.textContent = "show · new this week";
+  const g1 = h("figure", {}, body); const c = h("div", { class: "cap" }, g1); h("h3", {}, c, "How many models show each effect");
+  h("p", {}, c, "Models whose 95% interval excludes 0 in the direction found on the original checkpoints. Models that failed a validation check are not counted.");
+  const w = h("div", { class: "tablewrap" }, g1); w.id = "t-g1";
+  table("t-g1", ["Estimand", "Direction", "Validated", "Interval excludes 0", "Does not", "Failed validation"],
+    G.g1.map(r => [r.estimand, r.direction, String(r.cells_validated), String(r.cells_excluding_0), r.not_excluding_0.join(", ") || "–", r.failed_validation.join(", ") || "–"]), [2, 3]);
+  const rows = G.rows.slice().sort((a, b) => qsort(a, b) || (a.original - b.original));
+  const sm = h("div", { class: "small-multiples" }, body);
+  for (const [k, title, unit, d] of defs) {
+    const fg = h("figure", {}, sm); const cp = h("div", { class: "cap" }, fg); h("h3", {}, cp, title);
+    const v = h("div", { class: "viz" }, fg);
+    forest(v, { ref: 0, fmt: x => sgn(x, d), tfmt: x => x, xLabel: unit, rowH: 22, labelW: 120, aria: title,
+      rows: rows.filter(r => r[k]).map((r, i, arr) => ({ label: r.label + (r.original ? " (orig.)" : ""), sep: i > 0 && arr[i - 1].q !== r.q,
+        marks: [{ est: r[k].est, lo: r[k].lo, hi: r[k].hi, color: QCOL[r.q], hollow: r.original, name: r.model }] })) });
+  }
+  if (G.g2 && G.g2.length) {
+    const fg = h("figure", {}, body); const cp = h("div", { class: "cap" }, fg); h("h3", {}, cp, "The same map trained twice (RQ-KMeans 3×128)");
+    h("p", {}, cp, "Retrained minus original on the same rows and bootstrap draws: the closest available measure of training-run noise.");
+    const w2 = h("div", { class: "tablewrap" }, fg); w2.id = "t-g2";
+    table("t-g2", ["Estimand", "Retrained", "Original", "Difference [95% CI]"], G.g2.map(r => { const sc = r.stage === "exp6" ? 100 : 1; return [r.estimand, sgn(sc * r.retrained, 3), sgn(sc * r.original, 3), `${sgn(sc * r.est, 3)} [${sgn(sc * r.lo, 3)}, ${sgn(sc * r.hi, 3)}]`]; }), [1, 2, 3]);
+  }
+}
+
+function sources() {
+  const f = document.getElementById("sources");
+  h("div", { class: "eyebrow" }, f, "Sources");
+  h("div", {}, f, "Every number on this page is read from these files under $SIDLENS_WORK (first 16 hex digits of sha256). Rebuild with docs/results/retrain_and_layers/build_report.py.");
+  for (const s_ of D.sources) { const d = h("div", {}, f); h("code", {}, d, s_.path); d.appendChild(document.createTextNode("  " + s_.sha256)); }
+}
+
+header(); retrain(); zcrSec(); layers(); gridSec(); sources();
+</script>
+
+</body>
+</html>

@@ -43,6 +43,7 @@ import torch.nn as nn
 HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[3] / "src"))
 
+from sidlens.data import ar_inputs as AI                                 # noqa: E402
 from sidlens.data import ar_prompts as P                                 # noqa: E402
 from sidlens.data.sids import SidTable                                   # noqa: E402
 from sidlens.hooks.store import StoreReader                              # noqa: E402
@@ -66,10 +67,10 @@ def trie(table: SidTable, n: int):
     return {k: sorted(v) for k, v in nxt.items()}
 
 
-def token_frame(store: StoreReader, capture: Path, split: str, variant: str, n: int) -> pd.DataFrame:
+def token_frame(store: StoreReader, capture: Path, split: str, ckpt: str, n: int) -> pd.DataFrame:
     """Readout and history tokens with everything the lenses and decoders need."""
     rows = store.rows.reset_index(drop=True)
-    ex = {e.example_id: e for e in P.load_examples(variant, "next-item", split)}
+    ex = {e.example_id: e for e in AI.examples(ckpt, split)}
     g = pd.read_csv(capture / "self_greedy.csv").set_index("example_id")
     hdr = rows.role == "response_header"
     last_hdr = rows[hdr].groupby("example_id").pos.transform("max")
@@ -355,7 +356,8 @@ def run_decoders(tr, te, trf, tef, table, nxt, n, layers, dev, log):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--cell", type=int, choices=range(len(CELLS)), required=True)
+    ap.add_argument("--cell", type=int, choices=range(len(CELLS)))
+    ap.add_argument("--ckpt", help="a grid weight state (grid:<key>@<state>) instead of --cell")
     ap.add_argument("--train-capture", type=Path, required=True, help="ar_capture --out dir (holds store/)")
     ap.add_argument("--test-capture", type=Path, required=True)
     ap.add_argument("--parts", default="L1,L2")
@@ -367,17 +369,20 @@ def main(argv=None) -> int:
     args.out.mkdir(parents=True, exist_ok=False)
     torch.backends.cuda.matmul.allow_tf32 = False
     log = lambda m: print(f"{time.strftime('%H:%M:%S')} {m}", flush=True)       # noqa: E731
-    ckpt = CELLS[args.cell]
-    tr, te = StoreReader(args.train_capture / "store"), StoreReader(args.test_capture / "store")
+    if (args.cell is None) == (args.ckpt is None):
+        ap.error("give exactly one of --cell or --ckpt")
+    ckpt = args.ckpt or CELLS[args.cell]
+    tr = AI.capture_store(args.train_capture, ckpt, "train", verify=False)
+    te = AI.capture_store(args.test_capture, ckpt, "test", verify=False)
     for st, split in ((tr, "train"), (te, "test")):
-        if st.meta.get("target") != "self-greedy" or st.meta["split"] != split or st.meta["model"] != f"ar/{ckpt}":
+        if st.meta.get("target") != "self-greedy":
             raise RuntimeError(f"{st.root}: not the self-greedy {split} capture of {ckpt}")
     variant = tr.meta["variant"]
-    table = SidTable.load(variant)
+    table = AI.table(ckpt)
     n = table.variant.n_codebook
     nxt = trie(table, n)
-    trf = token_frame(tr, args.train_capture, "train", variant, n)
-    tef = token_frame(te, args.test_capture, "test", variant, n)
+    trf = token_frame(tr, args.train_capture, "train", ckpt, n)
+    tef = token_frame(te, args.test_capture, "test", ckpt, n)
     info = {"cell": ckpt, "variant": variant, "n_train_tokens": len(trf), "n_test_tokens": len(tef),
             "train_capture": str(args.train_capture), "test_capture": str(args.test_capture),
             "parts": args.parts, "seed": SEED}

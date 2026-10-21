@@ -85,6 +85,14 @@ PROFILES: dict[str, Profile] = {
         "No frozen files. Only the trees passed with --extra, e.g. a new "
         "derived/controlled/<exp>/<run> directory being sent back.",
         (), (), ()),
+    # A cluster that analyses OneDiffRec grid runs (sidlens.grid) reads each
+    # run's own work root, never the frozen substrate. Its gate checks the
+    # vendor trees (always checked) and nothing under frozen/.
+    "grid": Profile(
+        "grid",
+        "No frozen files: OneDiffRec grid runs carry their own data, SID tables "
+        "and checkpoints. Only external/labels (both catalogs) and derived/grid_inputs (near-duplicate pairs) travel with the code.",
+        (), (), ("external/labels", "derived/grid_inputs")),
 }
 
 

@@ -117,7 +117,13 @@ def test_external_labels_are_not_inside_frozen():
     man = L.manifest(CATEGORY)
     assert paths.FROZEN not in (paths.EXTERNAL / "x").parents
     assert not str(man["labels_path"]).startswith(str(paths.FROZEN))
-    assert str(man["labels_path"]).startswith(str(paths.EXTERNAL))
+    # The recorded path is provenance from the cluster that built the labels.
+    # After a bundle pull the work root differs, so compare the layout under
+    # the root, not the root itself; loaders resolve through paths.EXTERNAL.
+    from pathlib import Path
+    recorded = Path(str(man["labels_path"])).parts
+    assert recorded[-3:-1] == ("external", "labels") and "frozen" not in recorded
+    assert (paths.EXTERNAL / "labels" / recorded[-1]).is_file()
 
 
 def test_manifest_records_the_source_bytes():
