@@ -39,7 +39,9 @@ def main(argv=None) -> int:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    args.out.mkdir(parents=True, exist_ok=False)
+    args.out.mkdir(parents=True, exist_ok=True)        # the grid pipeline creates the cell folder first
+    if any((args.out / f).exists() for f in ("induction.npz", "inputs.json")):
+        raise FileExistsError(f"{args.out} already holds results; results are never overwritten")
     from transformers import AutoModelForCausalLM
     model = AutoModelForCausalLM.from_pretrained(str(args.base_model), local_files_only=True,
                                                  dtype=torch.float32).to(args.device).eval()

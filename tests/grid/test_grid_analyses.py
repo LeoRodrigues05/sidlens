@@ -122,7 +122,8 @@ def test_run_cell_skips_complete_and_moves_failed_aside(tmp_path, monkeypatch):
         return [[sys.executable, "-c", "import sys; sys.exit(int(open(sys.argv[1]).read()))", str(tmp_path / "rc")]]
     spec = PL.Spec("additions/fake", "any", commands=cmds, single=True)
     monkeypatch.setitem(PL.SPECS, spec.name, spec)
-    monkeypatch.setattr(PL, "_ctx", lambda s, ck, pilot=False: PL.Ctx("", {}, "best", PL.cell_dir(s, ck), tmp_path / "s"))
+    monkeypatch.setattr(PL, "_ctx", lambda s, ck, pilot=False, which="best":
+                        PL.Ctx("", {}, "best", PL.cell_dir(s, ck), tmp_path / "s"))
     (tmp_path / "rc").write_text("3")
     assert PL.run_cell(spec, None) == 3
     out = PL.cell_dir(spec, None)
@@ -133,3 +134,293 @@ def test_run_cell_skips_complete_and_moves_failed_aside(tmp_path, monkeypatch):
     assert json.loads((out / "output.sha256.json").read_text())
     n = len(calls)
     assert PL.run_cell(spec, None) == 0 and len(calls) == n          # complete: skipped, no command run
+
+
+# ---- the paper set ------------------------------------------------------------------
+class _FakeRegistry:
+    """Both catalogs, both paradigms and tasks; a core map at 4x256, a core map at 3x128 and a
+    map outside the core (5x512), each native and ZCR; AR runs also keep an intermediate state."""
+    def __init__(self):
+        self.e = {}
+        for ds in ("industrial", "office"):
+            for pt in ("next-item", "next2item"):
+                for par in ("ar", "diffgrm"):
+                    for v in ("rqkmeans_4codebook_256", "rqkmeans_3codebook_128", "rqkmeans_5codebook_512"):
+                        for z in ("", "__zcr-0123456789abcdef"):
+                            for st in ("best", "epoch-0.5") if par == "ar" else ("best",):
+                                ck = f"grid:grid-v1/{ds}/{pt}/{par}/{v}{z}/seed-42@{st}"
+                                self.e[ck] = {"paradigm": par, "task": grid.TASK_OF[pt], "digits": int(v[9])}
+
+    def names(self, states="best", **kw):
+        return [k for k in self.e if states == "all" or k.endswith("@best")]
+
+    def entry(self, ck):
+        return self.e[ck]
+
+
+def _maps(cells):
+    return sorted({(grid.cell_info(ck)["map"].split("__zcr-")[0], grid.cell_info(ck)["zcr"]) for _, ck in cells})
+
+
+def test_paper_set_runs_each_spec_on_its_declared_maps(monkeypatch):
+    from sidlens.grid import pipeline as PL, registry
+    monkeypatch.setattr(registry, "load", lambda: _FakeRegistry())
+    by = {}
+    for s, ck in PL.plan("paper"):
+        by.setdefault(s.name, []).append((s, ck))
+    assert all(ck is None or ck.endswith("@best") for cells in by.values() for _, ck in cells)
+    every = [("rqkmeans_3codebook_128", False), ("rqkmeans_3codebook_128", True), ("rqkmeans_4codebook_256", False),
+             ("rqkmeans_4codebook_256", True), ("rqkmeans_5codebook_512", False), ("rqkmeans_5codebook_512", True)]
+    core = [m for m in every if m[0] != "rqkmeans_5codebook_512"]
+    assert _maps(by["controlled/exp4_ar_copy_circuit"]) == every
+    assert _maps(by["controlled/exp7_diffusion_history_use"]) == every
+    assert _maps(by["controlled/exp6_ar_copy_in_decoding"]) == core
+    assert _maps(by["representation/ar_chain"]) == [m for m in core if not m[1]]
+    assert _maps(by["controlled/exp2_fixed_orders"]) == [m for m in core if m[0] == "rqkmeans_3codebook_128"]
+    assert len(by["controlled/exp6_ar_copy_in_decoding"]) == 8               # 4 maps x 2 catalogs
+    assert len(by["retrospective/exp6_time_structure"]) == 48                # every best run
+    assert len(by["additions/n2_ar_prefix_match/induction"]) == 1
+    assert {grid.cell_info(ck)["task"] for _, ck in by["controlled/exp5_ar_next_two_conditioning"]} == {"two-item"}
+    best = [ck for s, ck in PL.plan("best") if s.name == "controlled/exp6_ar_copy_in_decoding"]
+    assert len(best) == 12 and not any(s.name == "controlled/exp3_ar_history_patching" and "epoch" in ck
+                                       for s, ck in PL.plan("best"))
+    with pytest.raises(ValueError):
+        PL.plan("everything")
+
+
+def test_paper_set_trims_exp3_and_exp4_outside_the_core_only(monkeypatch):
+    from sidlens.grid import pipeline as PL, registry
+    monkeypatch.setattr(registry, "load", lambda: _FakeRegistry())
+    broad = "grid:grid-v1/industrial/next-item/ar/rqkmeans_5codebook_512/seed-42@best"
+    zcr = "grid:grid-v1/office/next-item/ar/rqkmeans_4codebook_256__zcr-0123456789abcdef/seed-42@best"
+    e3, e4 = PL.SPECS["controlled/exp3_ar_history_patching"], PL.SPECS["controlled/exp4_ar_copy_circuit"]
+
+    def args(spec, ck, which):
+        return [" ".join(map(str, cmd[3:])) + " " for cmd in spec.commands(PL._ctx(spec, ck, which=which))]
+    assert [("--split valid" in a, "--parts R,K " in a) for a in args(e4, broad, "paper")] == [(True, True)]
+    assert len(args(e4, broad, "best")) == 2 and all("--parts R,K,H" in a for a in args(e4, broad, "best"))
+    assert len(args(e4, zcr, "paper")) == 2 and all("--parts R,K,H" in a for a in args(e4, zcr, "paper"))
+    assert "--parts A " in args(e3, broad, "paper")[0] and "--parts A,B" in args(e3, broad, "best")[0]
+    assert "--parts A,B" in args(e3, zcr, "paper")[0]
+    assert PL.paper_tier(broad) == "broad" and PL.paper_tier(zcr) == "core"
+    assert PL.paper_tier(zcr.replace("__zcr-0123456789abcdef", "")) == "deep"
+
+
+def test_a_broad_cell_counts_for_the_paper_set_and_is_superseded_by_best(tmp_path, monkeypatch):
+    from sidlens import paths
+    from sidlens.grid import pipeline as PL, registry
+    monkeypatch.setattr(registry, "load", lambda: _FakeRegistry())
+    monkeypatch.setattr(paths, "RESULTS", tmp_path)
+    monkeypatch.setattr(paths, "SCRATCH", tmp_path / "scratch")
+    monkeypatch.setattr(PL, "_source_hashes", lambda: {})
+    seen = []
+
+    def cmds(c):
+        seen.append(c.full)
+        return [[sys.executable, "-c", "pass"]]
+    spec = PL.Spec("controlled/fake_tiered", "ar", commands=cmds, tiered=True)
+    monkeypatch.setitem(PL.SPECS, spec.name, spec)
+    ck = "grid:grid-v1/industrial/next-item/ar/rqkmeans_5codebook_512/seed-42@best"
+    out = PL.cell_dir(spec, ck)
+    assert PL.run_cell(spec, ck, which="paper") == 0 and seen == [False]
+    assert json.loads((out / "cell.json").read_text())["scope"] == "broad"
+    assert PL.is_complete(out) and not PL.is_complete(out, PL.needs_full("best", spec, ck))
+    assert PL.run_cell(spec, ck, which="paper") == 0 and seen == [False]          # complete for the paper set
+    assert PL.run_cell(spec, ck, which="best") == 0 and seen == [False, True]     # best reruns it in full
+    assert len(list(out.parent.glob("best.superseded-*"))) == 1
+    assert json.loads((out / "cell.json").read_text())["scope"] == "full"
+    assert PL.run_cell(spec, ck, which="paper") == 0 and len(seen) == 2           # a full cell serves both
+
+
+def test_case_study_is_the_native_case_maps_with_their_intermediate_states(monkeypatch):
+    from sidlens.grid import pipeline as PL, registry
+    monkeypatch.setattr(registry, "load", lambda: _FakeRegistry())
+    cells = PL.plan("case")
+    assert {grid.cell_info(ck)["map"] for _, ck in cells if ck} == {"rqkmeans_4codebook_256"}
+    e3 = [ck for s, ck in cells if s.name == "controlled/exp3_ar_history_patching"]
+    assert sorted(grid.split_name(ck)[1] for ck in e3) == ["best", "best", "epoch-0.5", "epoch-0.5"]
+    assert all(grid.split_name(ck)[1] == "best" for s, ck in cells if s.name == "controlled/exp6_ar_copy_in_decoding")
+    assert any(s.name == "representation/ar_chain" for s, _ in cells)
+    assert set(PL.CASE_MAPS) == {f"{q}_{d}codebook_256" for q in ("rqkmeans", "rqvae", "MQ") for d in (3, 4)}
+
+
+# ---- one job --------------------------------------------------------------------------
+def test_slurm_durations_parse():
+    from sidlens.grid import pipeline as PL
+    assert PL._parse_slurm_time("1-02:03:04") == 93784
+    assert PL._parse_slurm_time("02:03:04") == 7384 and PL._parse_slurm_time("03:04") == 184
+    assert PL._parse_slurm_time("UNLIMITED") is None and PL._parse_slurm_time("") is None
+
+
+def test_interleave_takes_one_cell_of_every_spec_first():
+    from sidlens.grid import pipeline as PL
+    a, b = PL.Spec("x/a", "any"), PL.Spec("x/b", "any")
+    cells = [(a, 1), (a, 2), (a, 3), (b, 1)]
+    assert [(s.name, c) for s, c in PL._interleave(cells)] == [("x/a", 1), ("x/b", 1), ("x/a", 2), ("x/a", 3)]
+
+
+def _fake_launch(fail=None, sleep=0.0):
+    """A launcher that plays a cell: status `running`, its start and end times, `sleep` seconds,
+    then its final status (failed for `fail` = (spec, map)) and the GPU it saw."""
+    import subprocess
+    from sidlens.grid import pipeline as PL
+
+    def launch(s, ck, which, env, log):
+        out = PL.cell_dir(s, ck)
+        bad = fail is not None and s.name == fail[0] and fail[1] in (ck or "")
+        code = ("import sys, time, pathlib; d = pathlib.Path(sys.argv[1]); d.mkdir(parents=True, exist_ok=True); "
+                "(d / 'status.txt').write_text('running'); t0 = time.time(); time.sleep(float(sys.argv[4])); "
+                "(d / 'gpu.txt').write_text(sys.argv[3]); (d / 'span.txt').write_text(f'{t0} {time.time()}'); "
+                "(d / 'status.txt').write_text(('failed exit=1' if sys.argv[2] == '1' else 'complete exit=0 seconds=1'))")
+        return subprocess.Popen([sys.executable, "-c", code, str(out), "1" if bad else "0",
+                                 env.get("CUDA_VISIBLE_DEVICES", "unset"), str(sleep)], env=env,
+                                start_new_session=True)
+    return launch
+
+
+def _batch_setup(tmp_path, monkeypatch, hours=0.01):
+    from sidlens import paths
+    from sidlens.grid import pipeline as PL, registry
+    monkeypatch.setattr(registry, "load", lambda: _FakeRegistry())
+    monkeypatch.setattr(paths, "RESULTS", tmp_path)
+    g = PL.Spec("t/gpu", "ar", hours=hours)
+    c = PL.Spec("t/cpu", "ar", gpu=False, hours=hours)
+    d = PL.Spec("t/child", "ar", gpu=False, hours=hours, after=("t/gpu",))
+    for s in (g, c, d):
+        monkeypatch.setitem(PL.SPECS, s.name, s)
+    return PL, g, c, d
+
+
+def test_batch_runs_every_cell_in_one_process_tree(tmp_path, monkeypatch):
+    PL, g, c, d = _batch_setup(tmp_path, monkeypatch)
+    bad = "industrial/next-item/ar/rqkmeans_5codebook_512/"
+    given_up = PL.cell_dir(c, "grid:grid-v1/office/next-item/ar/rqkmeans_3codebook_128/seed-42@best")
+    for k in (1, 2):                                           # two earlier failures: not rerun
+        (given_up.parent / f"best.failed-{k}").mkdir(parents=True)
+    res = PL.batch("best", ["t/gpu", "t/cpu", "t/child"], gpu_ids=["0", "1"], cpu_workers=1, poll=0.05,
+                   launch=_fake_launch(fail=("t/gpu", bad)))
+    assert res == {**res, "done": 11 + 11 + 11, "failed": 1, "blocked": 1, "gave_up": 1, "left": 0}
+    for s, ck in PL.plan("best", ["t/gpu", "t/cpu"]):
+        seen = PL.cell_dir(s, ck) / "gpu.txt"
+        if seen.exists():
+            assert seen.read_text() in (("0", "1") if s.gpu else ("",))   # CPU cells see no GPU
+    blocked = PL.cell_dir(d, "grid:grid-v1/industrial/next-item/ar/rqkmeans_5codebook_512/seed-42@best")
+    assert not blocked.exists()                                # its parent failed: never started
+    prog = json.loads(next((tmp_path / "batch").glob("progress-best-*.json")).read_text())
+    assert prog["final"] and prog["specs"]["t/gpu"]["failed"] == 1 and prog["gpu_hours_left"] == 0
+
+
+def test_batch_starts_nothing_measured_to_outlast_the_job(tmp_path, monkeypatch):
+    PL, g, c, d = _batch_setup(tmp_path, monkeypatch, hours=2)
+    first = PL.cell_dir(g, "grid:grid-v1/industrial/next-item/ar/rqkmeans_3codebook_128/seed-42@best")
+    first.mkdir(parents=True)
+    (first / "status.txt").write_text("complete exit=0 seconds=7200 finished=x\n")   # t/gpu: 2 h measured
+    res = PL.batch("best", ["t/gpu", "t/cpu"], gpu_ids=["0"], cpu_workers=1, seconds=3600, poll=0.05,
+                   launch=_fake_launch())
+    # t/gpu's 11 other cells would not fit; t/cpu has no measured time, so its upper bound
+    # (hours=2) does not hold it back
+    assert res["done"] == 12 and res["left"] == 11
+
+
+def test_an_interrupted_cell_is_rerun_without_counting_as_a_failure(tmp_path, monkeypatch):
+    from sidlens import paths
+    from sidlens.grid import pipeline as PL
+    monkeypatch.setattr(paths, "RESULTS", tmp_path)
+    monkeypatch.setattr(PL, "_source_hashes", lambda: {})
+    spec = PL.Spec("additions/fake_single", "any", commands=lambda c: [[sys.executable, "-c", "pass"]], single=True)
+    monkeypatch.setitem(PL.SPECS, spec.name, spec)
+    monkeypatch.setattr(PL, "_ctx", lambda s, ck, pilot=False, which="best":
+                        PL.Ctx("", {}, "best", PL.cell_dir(s, ck), tmp_path / "s"))
+    out = PL.cell_dir(spec, None)
+    out.mkdir(parents=True)
+    (out / "status.txt").write_text("interrupted finished=x\n")
+    assert PL.run_cell(spec, None) == 0 and PL.is_complete(out)
+    assert len(list(out.parent.glob("fake_single.interrupted-*"))) == 1 and PL._attempts(out) == 0
+
+
+def test_run_queues_one_job_and_refuses_a_second(tmp_path, monkeypatch, capsys):
+    from sidlens import paths
+    from sidlens.grid import pipeline as PL
+    monkeypatch.setattr(paths, "RESULTS", tmp_path)
+    for k, v in {"BATCH_GPUS": "4", "GPU_TYPE": "h200", "SLURM_PARTITION": "gpu", "BATCH_TIME": "1-00:00:00"}.items():
+        monkeypatch.setenv(k, v)
+    PL.submit_batch("paper", dry=True)
+    line = capsys.readouterr().out
+    assert line.count("DRY sbatch ") == 1 and "--gres=gpu:h200:4" in line and "--nodes=1" in line
+    assert "batch.sbatch paper 0" in line and "--array" not in line and "--partition=gpu" in line
+    monkeypatch.setattr(PL, "_queued_jobs", lambda name: ["4242"])
+    with pytest.raises(RuntimeError, match="4242"):
+        PL.submit_batch("paper")
+
+
+def test_finish_requeues_while_progress_is_made_and_summarizes_at_the_end(monkeypatch):
+    from sidlens.grid import pipeline as PL
+    calls = []
+    monkeypatch.setattr(PL, "submit_batch", lambda which, stages=None, dry=False, round_=0: calls.append(("q", round_)))
+    monkeypatch.setattr(PL, "summarize", lambda: calls.append(("summary",)))
+    monkeypatch.setattr(PL, "export", lambda: calls.append(("export",)) or "x.tar.gz")
+    PL.finish_or_requeue("paper", None, {"left": 5, "done": 3}, 0)
+    PL.finish_or_requeue("paper", None, {"left": 5, "done": 0}, 1)          # no progress: stop, do not loop
+    PL.finish_or_requeue("paper", None, {"left": 5, "done": 3}, 9)          # round cap (BATCH_MAX_ROUNDS=10)
+    PL.finish_or_requeue("paper", None, {"left": 0, "done": 3}, 2)
+    assert calls == [("q", 1), ("summary",), ("export",)]
+
+
+def test_attempts_count_the_last_failed_run_and_memory_sizes_parse(tmp_path):
+    from sidlens.grid import pipeline as PL
+    d = tmp_path / "best"
+    assert PL._attempts(d) == 0
+    d.mkdir()
+    (d / "status.txt").write_text("failed exit=1")
+    assert PL._attempts(d) == 1                                # not yet moved aside, still a failure
+    (tmp_path / "best.failed-1").mkdir()
+    (tmp_path / "best.interrupted-1").mkdir()                  # the job's end: not counted
+    assert PL._attempts(d) == 2
+    (d / "status.txt").write_text("interrupted finished=x")
+    assert PL._attempts(d) == 1
+    assert (PL._gb("64G"), PL._gb("512M"), PL._gb("1T"), PL._gb("2048")) == (64, 0.5, 1024, 2)
+
+
+def test_batch_keeps_running_cells_inside_the_memory_budget(tmp_path, monkeypatch):
+    PL, g, c, d = _batch_setup(tmp_path, monkeypatch)          # every fake spec declares 64G
+    res = PL.batch("best", ["t/gpu"], gpu_ids=["0", "1", "2"], cpu_workers=0, poll=0.02, mem_gb=100,
+                   launch=_fake_launch(sleep=0.2))
+    assert res["done"] == 12
+    spans = sorted(tuple(map(float, (PL.cell_dir(g, ck) / "span.txt").read_text().split()))
+                   for _, ck in PL.plan("best", ["t/gpu"]))
+    assert all(b[0] >= a[1] - 0.05 for a, b in zip(spans, spans[1:]))      # 90 GB: one 64G cell at a time
+
+
+def test_sigterm_marks_running_cells_interrupted_and_leaves_them_to_run(tmp_path, monkeypatch):
+    import os
+    import signal
+    import threading
+    PL, g, c, d = _batch_setup(tmp_path, monkeypatch)
+    threading.Timer(1.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+    res = PL.batch("best", ["t/gpu"], gpu_ids=["0", "1"], cpu_workers=0, poll=0.05, mem_gb=1000,
+                   launch=_fake_launch(sleep=60))
+    assert res["signal"] and res["done"] == 0 and res["left"] == 12
+    states = [PL._status(PL.cell_dir(g, ck)) for _, ck in PL.plan("best", ["t/gpu"])]
+    assert sum(st.startswith("interrupted") for st in states) == 2 and states.count("") == 10
+    assert signal.getsignal(signal.SIGTERM) is not None                 # the handler was put back
+
+
+def test_sigterm_counts_cells_that_finished_before_it_as_done(tmp_path, monkeypatch):
+    import os
+    import signal
+    import threading
+    PL, g, c, d = _batch_setup(tmp_path, monkeypatch)
+    threading.Timer(1.5, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+    res = PL.batch("best", ["t/gpu"], gpu_ids=["0", "1"], cpu_workers=0, poll=30, mem_gb=1000,
+                   launch=_fake_launch(sleep=0.1))                     # finish at once; reaped only by the stop
+    assert res["signal"] and res["done"] == 2 and res["left"] == 10
+
+
+def test_a_job_does_not_count_itself_when_it_requeues(monkeypatch):
+    import subprocess
+    from sidlens.grid import pipeline as PL
+    monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "4242\n4243\n")
+    monkeypatch.setenv("SLURM_JOB_ID", "4242")
+    assert PL._queued_jobs("sidlens-paper") == ["4243"]
+    monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "4242\n")
+    assert PL._queued_jobs("sidlens-paper") == []                    # only itself: the successor may queue

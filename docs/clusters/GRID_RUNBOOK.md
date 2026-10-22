@@ -1,10 +1,12 @@
 # Running sidlens on the OneDiffRec grid (coauthor runbook)
 
-Written 2026-10-21. This is what the coauthor runs on the cluster that holds
+Written 2026-10-21; one-job runs and the paper set added 2026-10-22. This is
+what the coauthor runs on the cluster that holds
 the finished OneDiffRec grid (`grid-v1`: two catalogs, AR and DiffGRM,
 next-item and next-two, 27 native SID maps and their ZCR twins, with
-intermediate weight states). The plan behind it is
-`docs/plans/COPYING_GRID_PLAN.md`; the code is `src/sidlens/grid/` and
+intermediate weight states). The plans behind it are
+`docs/plans/COPYING_GRID_PLAN.md` and `docs/plans/GRID_PAPER_SET.md`; the code
+is `src/sidlens/grid/` and
 `scripts/grid/`.
 
 Nothing here writes into the OneDiffRec work root. Every result goes to
@@ -51,11 +53,15 @@ lines of `~/.config/sidlens/grid.env`:
 
 | Variable | Meaning |
 |---|---|
-| `SLURM_PARTITION`, `SLURM_ACCOUNT`, `SLURM_QOS`, `SLURM_EXCLUDE` | GPU jobs (the names OneDiffRec's scripts use) |
-| `CPU_PARTITION`, `CPU_QOS` | CPU jobs (default: the GPU partition) |
-| `GPU_GRES` | default `gpu:1` |
-| `MAX_GPUS`, `MAX_CPUS` | array tasks running at once |
-| `CELLS_PER_TASK` | cells per array task (raise it if the queue caps jobs per user) |
+| `SLURM_PARTITION`, `SLURM_ACCOUNT`, `SLURM_QOS`, `SLURM_EXCLUDE` | the GPU partition and its settings (the names OneDiffRec's scripts use) |
+| `BATCH_GPUS` | GPUs on one node (default 8); the job uses one node |
+| `GPU_TYPE` | a GPU type, if your `--gres` needs one (e.g. `h200`) |
+| `BATCH_CPUS`, `BATCH_MEM` | cores and memory for the job (defaults 64 and `0`, all of the node's memory; set a size such as `1000G` if the cluster refuses `0`) |
+| `BATCH_TIME` | the longest time your partition allows (default `2-00:00:00`) |
+| `BATCH_CPU_WORKERS` | CPU cells run beside the GPU cells (default 4) |
+
+If `grid.env` was written before 2026-10-22, it lacks the `BATCH_*` lines; add
+them by hand (or rerun `setup`, which backs up the old file).
 
 ## 4. Register the grid
 
@@ -68,51 +74,60 @@ checks each against the run's own provenance (`provenance/{train,eval}`) and
 its `sources/` snapshot against our vendored copy, and writes
 `results_remote/registry/registry.json` plus `coverage.csv` (one row per run:
 usable or not, and why). Runs that are not usable are skipped by everything
-below and listed there.
+below and listed there. `run_paper.sh` registers the grid itself if no
+registry exists.
 
-## 5. Pilot (one GPU job, a few hours)
-
-```bash
-bash scripts/grid/sidlens-grid.sh pilot
-```
-
-Runs one short cell (64 rows) of every experiment on one configuration and
-writes `results_remote/pilot/timings-*.json`. Send us that file and the
-pilot's Slurm log before the full run: it tells us whether the measured cost
-matches the plan and whether any experiment fails on your cluster.
-
-## 6. Run
+## 5. Run: one job
 
 ```bash
-bash scripts/grid/run_best_state.sh      # every experiment, every configuration, best state
-bash scripts/grid/run_full.sh            # the same plus the cheap set at every intermediate state
+bash scripts/grid/run_paper.sh --dry-run      # the plan, and exactly one sbatch line
+bash scripts/grid/run_paper.sh
 ```
 
-`run_full.sh` alone does everything; `run_best_state.sh` first is the safe
-order. Both print the plan, then submit one Slurm array per experiment.
-Finished cells are skipped, so either script can be rerun after failures or
-time-outs (a failed cell is moved aside to `<state>.failed-<stamp>` and rerun).
-Useful options: `--dry-run` (print the `sbatch` lines), and through
-`sidlens-grid.sh run --stage cpu|ar|diffgrm|additions` a subset.
+This queues **one** Slurm job on one node. Inside it, every cell of the paper
+set (`docs/plans/GRID_PAPER_SET.md`) runs as its own process: one cell per GPU
+at a time and `BATCH_CPU_WORKERS` CPU cells beside them. The job starts with
+one cell of every experiment, so a broken experiment shows up in its first
+hour. When its time runs out it stops the running cells (marked `interrupted`,
+not failed), queues its successor and ends; there is never more than one job
+in the queue, and a second `run_paper.sh` is refused while one is queued. A
+cell that fails twice is given up on and listed. When nothing is left, the job
+writes the summaries and the export tarball (step 6).
 
-```bash
-bash scripts/grid/sidlens-grid.sh status --set full
-```
+Progress, updated after every cell:
 
-counts complete / failed / missing cells per experiment. A failed cell's
-`pipeline.log` (in its results folder) has the command and the error; Slurm
-logs are in `results_remote/provenance/slurm/`.
+- `results_remote/batch/progress-paper-<job>.json`: per experiment, cells
+  done, failed and left, median minutes per cell, and GPU-hours left. **Send
+  us this file after the first three or four hours**: it is the cost estimate.
+- `results_remote/provenance/slurm/sidlens-paper-<job>.out`: the job's log.
+- `bash scripts/grid/sidlens-grid.sh status --set paper`: complete, failed and
+  missing cells per experiment.
+- A failed cell's `pipeline.log` (in its results folder) has the command and
+  the error; `results_remote/batch/logs/` holds each cell's console output.
 
-## 7. Summarize and send back
+To stop: `scancel <job>`. To resume: run `run_paper.sh` again; finished cells
+are skipped. If the job could not queue its successor (for example, `sbatch`
+does not work on compute nodes), its log says so: run `run_paper.sh` again.
+
+Other sets, each also one job: `run_case_study.sh` (optional, when we ask:
+every experiment on the native 3x256 and 4x256 maps of each quantizer, plus
+the intermediate weight states), `run_best_state.sh` and `run_full.sh` (every
+experiment on every map; far larger). `sidlens-grid.sh run --arrays` keeps the
+old one-array-per-experiment mode; do not use it on a queue that limits jobs.
+`sidlens-grid.sh pilot` (64 rows of every experiment, one GPU) still exists
+but is not needed: the first hours of the one job give the same information.
+
+## 6. Send back
+
+The job writes `results_remote/MANIFEST.sha256` and a tarball in
+`<sidlens work root>/exports/` when every cell is done. Send the tarball (or
+push it as agreed); we check it against the manifest here. To export
+earlier, by hand:
 
 ```bash
 bash scripts/grid/sidlens-grid.sh summarize
 bash scripts/grid/sidlens-grid.sh export
 ```
-
-`export` writes `results_remote/MANIFEST.sha256` and a tarball in
-`<sidlens work root>/exports/`. Send the tarball (or push it as agreed); we
-check it against the manifest here.
 
 ## What runs
 
@@ -131,8 +146,11 @@ Per cell, everything lands in
 | additions | N2 prefix matching (+ base-model induction scores, once) | AR next-item |
 | additions | N4 no-training baselines | every run |
 
-At intermediate weight states (`run_full.sh` only): AR exp3 Part A, exp4 Part R
-(test split), DiffGRM exp7.
+That table is the full set (`run_best_state.sh`). The paper set runs each
+experiment on every map, on the core maps or on the native core maps only
+(`docs/plans/GRID_PAPER_SET.md`). At intermediate weight states
+(`run_full.sh`, `run_case_study.sh`): AR exp3 Part A, exp4 Part R (test split),
+DiffGRM exp7.
 
 Industrial uses all 6,297 test users; Office a fixed sample of 6,297 users
 (sha256 of a recorded seed and the user id) for every experiment that runs a

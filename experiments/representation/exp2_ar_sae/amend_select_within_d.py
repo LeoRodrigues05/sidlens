@@ -47,6 +47,7 @@ def main(argv=None) -> int:
     ap.add_argument("--sae-run", type=Path, required=True)
     ap.add_argument("--analysis", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--smoke", action="store_true", help="accept a pilot SAE run (code test only)")
     args = ap.parse_args(argv)
     if (args.cell is None) == (args.ckpt is None):
         ap.error("give exactly one of --cell or --ckpt")
@@ -86,6 +87,10 @@ def main(argv=None) -> int:
             used, cs = set(), []
             for j0 in jS:
                 near = [j for j in sorted(pool, key=lambda j: abs(meanact[j] - meanact[j0])) if j not in used][:20]
+                if not near and args.smoke:      # a pilot SAE (one epoch, a few rows) has no AUC-neutral pool
+                    near = [j for j in range(len(cand)) if cand[j] not in S and j not in used][:20]
+                if not near:
+                    raise RuntimeError(f"L{L}: no control latent left for latent {int(cand[j0])}")
                 pick = int(rng.choice(near))
                 used.add(pick)
                 cs.append(int(cand[pick]))
