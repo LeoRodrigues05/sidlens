@@ -12,7 +12,10 @@ Traps, each with its guard
    the same edges those experiments remove; alpha = 0 is their block.
 2. **alpha = 1 that is not the baseline.** V3 checks it bit for bit against the
    unscaled route (module doc of `protocol.md`).
-3. **A decoder that is not the run's.** V2a gates on the run's saved lists.
+3. **A decoder that is not the run's.** V2a gates on the run's saved lists, at the
+   evaluator's settings. AR alphas then rescore each row's candidates in one batch
+   (protocol amendment 1, `decode_ar.intervention_protocol`; `--rescore-batch 1`
+   restores one at a time); alpha = 1 and the V3 baseline use the same setting.
 
     python run.py --ckpt 'grid:<key>@best' --out <new dir> [--limit 64]
 """
@@ -60,6 +63,7 @@ def run_ar(args, entry, log, validation) -> tuple[list, dict]:
     proto = GP.ar_protocol(entry, require_full=not args.limit)
     if proto["batch_size"] != 1:
         raise RuntimeError("the run was evaluated in batches > 1; reproducing it needs its full row order")
+    cproto = DA.intervention_protocol(proto, args.rescore_batch)          # amendment 1
     saved = GP.load(entry)
     model = ar.load_model(ckpt, device=args.device, dtype=proto["dtype"] if args.device == "cuda" else "float32")
     grammar, _ = DA.catalog_grammar(tok, entry["sid_index"]["path"], proto["horizon"])
@@ -72,17 +76,17 @@ def run_ar(args, entry, log, validation) -> tuple[list, dict]:
     encoded = [P.encode(ex, tok, vocab, template=gin.template) for ex in examples]
     lists, counts = {}, {}
     for a in ALPHAS:
-        out, c = DA.run_conditions(model, tok, grammar, examples, encoded, vocab, proto, ["C_all"], alpha=a, log=log)
+        out, c = DA.run_conditions(model, tok, grammar, examples, encoded, vocab, cproto, ["C_all"], alpha=a, log=log)
         lists[a], counts[tag_of(a)] = out["C_all"], c["C_all"]
     m = min(64, len(examples))
-    base, _ = DA.run_conditions(model, tok, grammar, examples[:m], encoded[:m], vocab, proto, ["B"], alpha=1.0)
+    base, _ = DA.run_conditions(model, tok, grammar, examples[:m], encoded[:m], vocab, cproto, ["B"], alpha=1.0)
     validation["V3_alpha1_is_unscaled_route"] = all(lists[1.0][e.example_id] == base["B"][e.example_id]
                                                     for e in examples[:m])
     validation["V2b_alpha1_vs_saved_plain"] = GP.compare(
         lists[1.0], saved, "ar", score_atol=1e-2, tie_atol=1e-2, max_tie_share=1.0, only_saved=True)
     validation["edges"] = counts
     frames = [DA.lists_frame(lists[a], examples, tag_of(a)) for a in ALPHAS]
-    return frames, {"examples": [e.example_id for e in examples], "proto": proto}
+    return frames, {"examples": [e.example_id for e in examples], "proto": proto, "intervention_protocol": cproto}
 
 
 def run_diffgrm(args, entry, log, validation) -> tuple[list, dict]:
@@ -151,6 +155,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--ckpt", required=True, help="a next-item grid weight state, best (grid:<key>@best)")
     ap.add_argument("--v2-rows", type=int, default=512, help="AR: rows decoded plainly for V2a")
+    ap.add_argument("--rescore-batch", type=int, default=0,
+                    help="AR alphas: candidates rescored per forward (0: all of a row's; 1: the evaluator's)")
     ap.add_argument("--limit", type=int, default=None, help="first N rows (pilot only)")
     ap.add_argument("--device", default="cuda", help="cpu runs float32 (smoke tests; bit-exact controls hold on GPU only)")
     ap.add_argument("--out", type=Path, required=True)
@@ -190,6 +196,7 @@ def main(argv=None) -> int:
     (args.out / "inputs.json").write_text(json.dumps({
         "checkpoint": args.ckpt, "grid_key": entry["key"], "paradigm": entry["paradigm"], "alphas": list(ALPHAS),
         "n_rows": len(ids), "limited": args.limit, "protocol": info["proto"],
+        "intervention_protocol": info.get("intervention_protocol"),
         "device": torch.cuda.get_device_name() if args.device == "cuda" else args.device,
         "torch": torch.__version__, **grid.cell_info(args.ckpt)},
         indent=1, default=str))

@@ -32,6 +32,9 @@ A *cell* is one experiment spec on one grid weight state; it writes to
     case   the optional case study (`run_case_study.sh`): every spec, in full, on
            the native `CASE_MAPS` (3x256 and 4x256 of each quantizer, both
            catalogs), plus the cheap set at their intermediate weight states
+    quick  the paper set cut to 8-14 hours on 16 H200s (`run_quick.sh`, `QUICK`): one
+           test per claim; exp3 and exp4 run their broad parts on every map; a
+           subset of the paper set, which continues from where it stops
 
 Traps, each with its guard
 --------------------------
@@ -79,7 +82,7 @@ from sidlens import grid, paths
 REPO = paths.REPO
 PY = sys.executable
 EXP = REPO / "experiments"
-SETS = ("best", "full", "paper", "case")
+SETS = ("best", "full", "paper", "case", "quick")
 # The paper set's core maps (GRID_PAPER_SET.md): the three quantizers at one size
 # (4x256), plus the two maps of our archived matched AR/DiffGRM cells, so grid
 # numbers can be set beside the draft's. Each with its ZCR twin, in both catalogs.
@@ -385,6 +388,31 @@ SPEC_LIST = [
          summary=s_cells("additions/n4_no_training_baselines/summarize.py")),
 ]
 SPECS = {s.name: s for s in SPEC_LIST}
+# The quick set (GRID_PAPER_SET.md): one test per claim, sized to 8-14 hours on 16 H200s
+# with batched rescoring. Spec -> group of maps (all | core | deep = native core).
+QUICK = {
+    "controlled/exp3_ar_history_patching": "all",           # Part A only (scope broad)
+    "controlled/exp4_ar_copy_circuit": "all",               # R and K, validation split (scope broad)
+    "controlled/exp10_ar_last_digit_sibling": "all",
+    "controlled/exp5_ar_next_two_conditioning": "deep",
+    "controlled/exp6_ar_copy_in_decoding": "core",
+    "controlled/exp9_ar_order_vs_time": "deep",
+    "controlled/exp7_diffusion_history_use": "all",
+    "controlled/exp8_diffusion_copy_route": "all",
+    "controlled/exp12_diffusion_activation_patching": "all",
+    "controlled/exp13_diffusion_step_switch": "core",
+    "controlled/exp14_diffusion_decode_perturbations": "all",
+    "representation/exp5_diffusion_encoder_features": "core",
+    "retrospective/exp2_prefix": "all",
+    "retrospective/exp3_collisions": "all",
+    "retrospective/exp4_next_two": "all",
+    "retrospective/exp6_time_structure": "all",
+    "retrospective/exp7_collision_credit": "core",
+    "additions/n1_prefix_conditioning": "core",
+    "additions/n2_ar_prefix_match/induction": "all",
+    "additions/n4_no_training_baselines": "all",
+}
+assert set(QUICK) <= set(SPECS), set(QUICK) - set(SPECS)
 STAGES = {
     "checks": [],
     "cpu": [s.name for s in SPEC_LIST if not s.gpu],
@@ -427,13 +455,18 @@ def paper_tier(ckpt: str) -> str:
     return "core" if i["zcr"] else "deep"
 
 
-def in_paper(spec: Spec, ckpt: str | None) -> bool:
-    if spec.paper is None:
+def in_tier(tier: str | None, ckpt: str | None) -> bool:
+    """Whether a weight state belongs to a spec's group of maps: all, core or deep (native core)."""
+    if tier is None:
         return False
-    if spec.paper == "all" or ckpt is None:
+    if tier == "all" or ckpt is None:
         return True
-    tier = paper_tier(ckpt)
-    return tier == "deep" or (spec.paper == "core" and tier == "core")
+    t = paper_tier(ckpt)
+    return t == "deep" or (tier == "core" and t == "core")
+
+
+def in_paper(spec: Spec, ckpt: str | None) -> bool:
+    return in_tier(spec.paper, ckpt)
 
 
 def in_case(ckpt: str) -> bool:
@@ -441,9 +474,14 @@ def in_case(ckpt: str) -> bool:
     return not i["zcr"] and i["map"] in CASE_MAPS
 
 
+def _broad(which: str, ckpt: str | None) -> bool:
+    """Whether the set runs the reduced parts of exp3 and exp4 here (trap 6)."""
+    return ckpt is not None and (which == "quick" or (which == "paper" and paper_tier(ckpt) == "broad"))
+
+
 def needs_full(which: str, spec: Spec, ckpt: str | None) -> bool:
     """Whether the set needs this cell with every part (trap 6)."""
-    return spec.tiered and not (which == "paper" and ckpt is not None and paper_tier(ckpt) == "broad")
+    return spec.tiered and not _broad(which, ckpt)
 
 
 def plan(which: str, stages=None) -> list[tuple[Spec, str | None]]:
@@ -457,7 +495,7 @@ def plan(which: str, stages=None) -> list[tuple[Spec, str | None]]:
     for name in dict.fromkeys(names):
         spec = SPECS[name]
         if spec.single:
-            if which != "paper" or in_paper(spec, None):
+            if (which != "paper" or in_paper(spec, None)) and (which != "quick" or spec.name in QUICK):
                 cells.append((spec, None))
             continue
         for ck in reg.names(states="all"):
@@ -470,6 +508,8 @@ def plan(which: str, stages=None) -> list[tuple[Spec, str | None]]:
             if st != grid.BEST and not (which in ("full", "case") and spec.cheap):
                 continue
             if which == "paper" and not in_paper(spec, ck):
+                continue
+            if which == "quick" and not in_tier(QUICK.get(spec.name), ck):
                 continue
             if which == "case" and not in_case(ck):
                 continue
@@ -485,7 +525,7 @@ def _ctx(spec: Spec, ckpt: str | None, pilot=False, which: str = "best") -> Ctx:
     # starts by deleting its scratch folder: the two must never share one
     scratch = (paths.SCRATCH / "pilot" if pilot else paths.SCRATCH) / spec.name / (
         grid.map_dir(ckpt) if ckpt else "single")
-    full = not (which == "paper" and ckpt is not None and paper_tier(ckpt) == "broad")
+    full = not _broad(which, ckpt)
     return Ctx(ckpt or "", entry, grid.split_name(ckpt)[1] if ckpt else grid.BEST, out, scratch, pilot, full)
 
 
@@ -612,16 +652,19 @@ def _queued_jobs(name: str) -> list[str]:
 
 
 def submit_batch(which: str, stages=None, dry: bool = False, round_: int = 0) -> str | None:
-    """Queue the whole set as ONE Slurm job (trap 7): one node, `BATCH_GPUS` GPUs,
-    `BATCH_CPUS` cores, `BATCH_MEM`, `BATCH_TIME`; partition, account, QoS and excluded
-    nodes as for the arrays. Refuses while a job of the same set is queued or running."""
+    """Queue the whole set as ONE Slurm job (trap 7): `BATCH_NODES` nodes (default 1), each
+    with `BATCH_GPUS` GPUs, `BATCH_CPUS` cores and `BATCH_MEM`; `BATCH_TIME`; partition,
+    account, QoS and excluded nodes as for the arrays. Refuses while any sidlens job, of
+    any set, is queued or running."""
     name = _job_name(which)
-    if not dry and (q := _queued_jobs(name)):
-        raise RuntimeError(f"job {q[0]} ({name}) is already queued or running; one job at a time "
-                           f"(it requeues itself; `scancel {q[0]}` first to start over)")
+    q = [] if dry else [(j, n) for n in map(_job_name, SETS) for j in _queued_jobs(n)]
+    if q:                                                 # one sidlens job at a time, whatever the set
+        raise RuntimeError(f"job {q[0][0]} ({q[0][1]}) is already queued or running; one job at a time "
+                           f"(it requeues itself; let it finish, or `scancel {q[0][0]}` first)")
     gpus = int(os.environ.get("BATCH_GPUS", "8"))
     gres = f"gpu:{os.environ['GPU_TYPE']}:{gpus}" if os.environ.get("GPU_TYPE") else f"gpu:{gpus}"
-    cmd = ["sbatch", "--parsable", f"--job-name={name}", "--nodes=1", "--ntasks=1", f"--gres={gres}",
+    nodes = int(os.environ.get("BATCH_NODES", "1"))
+    cmd = ["sbatch", "--parsable", f"--job-name={name}", f"--nodes={nodes}", "--ntasks-per-node=1", f"--gres={gres}",
            f"--cpus-per-task={os.environ.get('BATCH_CPUS', '64')}", f"--mem={os.environ.get('BATCH_MEM', '0')}",
            f"--time={os.environ.get('BATCH_TIME', '2-00:00:00')}",
            f"--output={paths.RESULTS / 'provenance' / 'slurm' / f'{name}-%j.out'}"]
@@ -720,7 +763,8 @@ def _launch_one(spec: Spec, ckpt: str | None, which: str, env: dict, log: Path) 
 
 def batch(which: str, stages=None, gpu_ids=None, cpu_workers: int = 4, seconds: float | None = None,
           max_attempts: int = 2, poll: float = 15.0, launch: Callable = _launch_one,
-          mem_gb: float | None = None) -> dict:
+          mem_gb: float | None = None, share: list | None = None, tag: str = "",
+          margin: float = 900) -> dict:
     """Every unfinished cell of the set, inside this one allocation.
 
     One cell per GPU at a time (CUDA_VISIBLE_DEVICES set to that GPU) and up to
@@ -737,17 +781,23 @@ def batch(which: str, stages=None, gpu_ids=None, cpu_workers: int = 4, seconds: 
     SIGTERM the running cells are stopped and marked `interrupted` (trap 8). Writes
     `results_remote/batch/progress-*` after every cell: per spec done, failed and
     left, median minutes, hours left.
+
+    `share` restricts the run to those (spec, ckpt) cells (one node's share in a
+    multi-node job, `coordinate`); `tag` names its progress file. At the deadline
+    (the job's time left minus `margin` seconds) the batch stops as on SIGTERM, so
+    whoever requeues the next job still has time to do it before Slurm's kill.
     """
     import signal
     t0 = time.time()
     if seconds is None and (left := _seconds_left()) is not None:
-        seconds = left - 600
+        seconds = left - margin
     deadline = t0 + seconds if seconds else None
     gpu_ids = list(_visible_gpus() if gpu_ids is None else gpu_ids)
     ncpu = int(os.environ.get("SLURM_CPUS_PER_TASK") or os.cpu_count() or 8)
     threads = str(max(1, ncpu // max(1, len(gpu_ids) + cpu_workers)))
     cells = plan(which, stages)
-    todo = [(s, ck) for s, ck in cells if not is_complete(cell_dir(s, ck), needs_full(which, s, ck))]
+    mine = cells if share is None else [x for x in cells if (x[0].name, x[1]) in {(n, c) for n, c in share}]
+    todo = [(s, ck) for s, ck in mine if not is_complete(cell_dir(s, ck), needs_full(which, s, ck))]
     gave_up = [(s, ck) for s, ck in todo if _attempts(cell_dir(s, ck)) >= max_attempts]
     todo = _interleave([x for x in todo if x not in gave_up])
     if any(s.gpu for s, _ in todo) and not gpu_ids:
@@ -757,7 +807,7 @@ def batch(which: str, stages=None, gpu_ids=None, cpu_workers: int = 4, seconds: 
         if (sec := _seconds(cell_dir(s, ck))) is not None and is_complete(cell_dir(s, ck)):
             med.setdefault(s.name, []).append(sec)
     stamp = time.strftime("%Y%m%dT%H%M%S")
-    prog = paths.RESULTS / "batch" / f"progress-{which}-{os.environ.get('SLURM_JOB_ID', stamp)}.json"
+    prog = paths.RESULTS / "batch" / f"progress-{which}-{os.environ.get('SLURM_JOB_ID', stamp)}{tag}.json"
     logs = paths.RESULTS / "batch" / "logs"
     running: dict = {}                                   # Popen -> (spec, ckpt, slot, start)
     free_gpus, free_cpu = list(gpu_ids), cpu_workers
@@ -802,6 +852,9 @@ def batch(which: str, stages=None, gpu_ids=None, cpu_workers: int = 4, seconds: 
     write_progress()
     try:
         while (todo or running) and not stop["signal"]:
+            if deadline is not None and time.time() > deadline:
+                stop["signal"] = True                     # the job's end is near: stop as on SIGTERM
+                break
             for p in [p for p in running if p.poll() is not None]:
                 s, ck, slot, start = running.pop(p)
                 if s.gpu:
@@ -874,6 +927,71 @@ def batch(which: str, stages=None, gpu_ids=None, cpu_workers: int = 4, seconds: 
     res = {"done": len(done), "failed": len(failed), "blocked": len(blocked), "gave_up": len(gave_up),
            "left": len(todo), "progress": str(prog), "signal": stop["signal"]}
     print(f"[batch] end: {json.dumps(res)}", flush=True)
+    return res
+
+
+def assign_shards(cells: list, n: int, estimate: Callable) -> list[list]:
+    """Split cells into `n` shares, keeping every cell of one weight state together (a cell
+    and its parent, e.g. retrospective exp7 and exp6, run on the same node), largest
+    groups first onto the least-loaded share. Deterministic: same cells, same shares."""
+    groups: dict = {}
+    for s, ck in cells:
+        groups.setdefault(ck or "", []).append((s, ck))
+    load, shares = [0.0] * n, [[] for _ in range(n)]
+    for key, g in sorted(groups.items(), key=lambda kv: (-sum(estimate(s) for s, _ in kv[1]), kv[0])):
+        i = min(range(n), key=lambda j: (load[j], j))
+        shares[i] += g
+        load[i] += sum(estimate(s) for s, _ in g)
+    return shares
+
+
+def _estimates(which: str, stages) -> Callable:
+    """Seconds per cell of a spec: the median of its finished cells, else `Spec.hours`."""
+    med: dict[str, list] = {}
+    for s, ck in plan(which, stages):
+        if is_complete(cell_dir(s, ck)) and (sec := _seconds(cell_dir(s, ck))) is not None:
+            med.setdefault(s.name, []).append(sec)
+
+    def est(s: Spec) -> float:
+        xs = sorted(med.get(s.name, []))
+        w = xs[len(xs) // 2] if xs else s.hours * 3600
+        return w if s.gpu else w / 4                      # CPU cells run beside the GPU cells
+    return est
+
+
+def runnable(which: str, stages, max_attempts: int) -> list:
+    """Cells still to run that have not used up their attempts."""
+    return [(s, ck) for s, ck in plan(which, stages)
+            if not is_complete(cell_dir(s, ck), needs_full(which, s, ck))
+            and _attempts(cell_dir(s, ck)) < max_attempts]
+
+
+def coordinate(which: str, stages, nodes: int, round_: int, max_attempts: int = 2,
+               run: Callable = subprocess.call) -> dict:
+    """A job on several nodes (trap 7 still holds: one job). Splits the unfinished cells
+    into one share per node (`assign_shards`), writes them to a file, and runs one
+    `batch --worker` per node as a job step (`srun`, one task per node, all of that node's
+    GPUs, cores and memory). When the steps end it reports progress as `batch` does, so
+    `finish_or_requeue` can queue the next job or write the export."""
+    before = runnable(which, stages, max_attempts)
+    shares = assign_shards(before, nodes, _estimates(which, stages))
+    jid = os.environ.get("SLURM_JOB_ID", time.strftime("%Y%m%dT%H%M%S"))
+    f = paths.RESULTS / "batch" / f"shares-{which}-{jid}.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps([[[s.name, ck] for s, ck in sh] for sh in shares], indent=1))
+    print(f"[coordinate] {which}: {len(before)} cells on {nodes} nodes, shares {[len(x) for x in shares]} ({f})",
+          flush=True)
+    per_node = os.environ.get("BATCH_GPUS", "8")
+    gres = f"gpu:{os.environ['GPU_TYPE']}:{per_node}" if os.environ.get("GPU_TYPE") else f"gpu:{per_node}"
+    cmd = ["srun", f"--nodes={nodes}", f"--ntasks={nodes}", "--ntasks-per-node=1", f"--gres={gres}",
+           f"--cpus-per-task={os.environ.get('SLURM_CPUS_PER_TASK', os.environ.get('BATCH_CPUS', '64'))}",
+           "--mem=0", "--kill-on-bad-exit=0", PY, "-u", "-m", "sidlens.grid.pipeline", "batch", "--set", which,
+           "--worker", "--shares", str(f), "--max-attempts", str(max_attempts),
+           *(["--stage", *stages] if stages else [])]
+    rc = run(cmd, cwd=REPO)
+    after = runnable(which, stages, max_attempts)
+    res = {"done": len(before) - len(after), "left": len(after), "steps_rc": rc}
+    print(f"[coordinate] end: {json.dumps(res)}", flush=True)
     return res
 
 
@@ -982,6 +1100,10 @@ def main(argv=None) -> int:
     b.add_argument("--max-attempts", type=int, default=int(os.environ.get("BATCH_MAX_ATTEMPTS", "2")))
     b.add_argument("--seconds", type=float, default=None, help="default: the Slurm job's time left - 10 min")
     b.add_argument("--no-requeue", action="store_true")
+    b.add_argument("--margin", type=float, default=float(os.environ.get("BATCH_MARGIN_MIN", "15")),
+                   help="minutes before the job's end at which cells stop and the next job is queued")
+    b.add_argument("--worker", action="store_true", help="one node's share of a multi-node job (no requeue)")
+    b.add_argument("--shares", type=Path, help="with --worker: the coordinator's shares file")
     o = sub.add_parser("one", help="one cell (started by batch)")
     o.add_argument("--spec", required=True)
     o.add_argument("--ckpt", default=None)
@@ -1026,10 +1148,20 @@ def main(argv=None) -> int:
             submit_batch(args.set, args.stage, args.dry_run)
         return 0
     if args.cmd == "batch":
-        res = batch(args.set, args.stage, cpu_workers=args.cpu_workers, seconds=args.seconds,
-                    max_attempts=args.max_attempts)
+        kw = dict(cpu_workers=args.cpu_workers, seconds=args.seconds, max_attempts=args.max_attempts,
+                  margin=args.margin * 60)
+        if args.worker:                                   # a step of a multi-node job: its share only
+            rank = int(os.environ.get("SLURM_PROCID", "0"))
+            share = [tuple(x) for x in json.loads(args.shares.read_text())[rank]]
+            res = batch(args.set, args.stage, share=share, tag=f"-node{rank}", **kw)
+            return 0 if not res["failed"] else 1
+        nodes = int(os.environ.get("SLURM_JOB_NUM_NODES") or os.environ.get("SLURM_NNODES") or 1)
+        if nodes > 1:
+            res = coordinate(args.set, args.stage, nodes, args.round, args.max_attempts)
+        else:
+            res = batch(args.set, args.stage, **kw)
         finish_or_requeue(args.set, args.stage, res, args.round, auto=not args.no_requeue)
-        return 0 if not res["failed"] else 1
+        return 0 if not res.get("failed") else 1
     if args.cmd == "one":
         return run_cell(SPECS[args.spec], args.ckpt, which=args.set)
     if args.cmd == "status":

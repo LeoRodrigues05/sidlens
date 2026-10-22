@@ -348,9 +348,9 @@ def test_run_queues_one_job_and_refuses_a_second(tmp_path, monkeypatch, capsys):
     line = capsys.readouterr().out
     assert line.count("DRY sbatch ") == 1 and "--gres=gpu:h200:4" in line and "--nodes=1" in line
     assert "batch.sbatch paper 0" in line and "--array" not in line and "--partition=gpu" in line
-    monkeypatch.setattr(PL, "_queued_jobs", lambda name: ["4242"])
+    monkeypatch.setattr(PL, "_queued_jobs", lambda name: ["4242"] if name == "sidlens-quick" else [])
     with pytest.raises(RuntimeError, match="4242"):
-        PL.submit_batch("paper")
+        PL.submit_batch("paper")                          # a quick job is queued: no paper job beside it
 
 
 def test_finish_requeues_while_progress_is_made_and_summarizes_at_the_end(monkeypatch):
@@ -424,3 +424,84 @@ def test_a_job_does_not_count_itself_when_it_requeues(monkeypatch):
     assert PL._queued_jobs("sidlens-paper") == ["4243"]
     monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "4242\n")
     assert PL._queued_jobs("sidlens-paper") == []                    # only itself: the successor may queue
+
+
+# ---- batched rescoring, the quick set, several nodes ------------------------------------
+def test_intervention_protocol_rescores_a_rows_candidates_together():
+    from sidlens.grid import decode_ar as DA
+    proto = {"num_beams": 50, "top_k": 10, "batch_size": 1, "score_batch_size": 1}
+    assert DA.intervention_protocol(proto)["score_batch_size"] == 50
+    assert DA.intervention_protocol(proto, 1)["score_batch_size"] == 1
+    assert DA.intervention_protocol(proto)["evaluator_score_batch_size"] == 1 and proto["score_batch_size"] == 1
+    with pytest.raises(ValueError):
+        DA.intervention_protocol(proto, -1)
+
+
+def test_quick_set_is_a_broad_subset_of_the_paper_set(monkeypatch):
+    from sidlens.grid import pipeline as PL, registry
+    monkeypatch.setattr(registry, "load", lambda: _FakeRegistry())
+    quick = PL.plan("quick")
+    paper = {(s.name, ck) for s, ck in PL.plan("paper")}
+    assert quick and all((s.name, ck) in paper for s, ck in quick)
+    by = {}
+    for s, ck in quick:
+        by.setdefault(s.name, []).append(ck)
+    assert "representation/ar_chain" not in by and "additions/n3_copy_dose" not in by
+    assert len(by["controlled/exp4_ar_copy_circuit"]) == 12 and len(by["controlled/exp6_ar_copy_in_decoding"]) == 8
+    assert len(by["controlled/exp9_ar_order_vs_time"]) == 4                  # native core maps only
+    core = "grid:grid-v1/industrial/next-item/ar/rqkmeans_4codebook_256/seed-42@best"
+    e4 = PL.SPECS["controlled/exp4_ar_copy_circuit"]
+    cmds = [" ".join(map(str, c)) + " " for c in e4.commands(PL._ctx(e4, core, which="quick"))]
+    assert len(cmds) == 1 and "--split valid" in cmds[0] and "--parts R,K " in cmds[0]   # broad even on core
+    assert not PL.needs_full("quick", e4, core) and PL.needs_full("paper", e4, core)
+
+
+def test_shares_keep_a_weight_state_together_and_balance_the_load():
+    from sidlens.grid import pipeline as PL
+    big, small = PL.Spec("x/big", "ar", hours=8), PL.Spec("x/small", "ar", hours=1)
+    child = PL.Spec("x/child", "ar", gpu=False, hours=1, after=("x/big",))
+    cells = [(big, f"ck{i}") for i in range(4)] + [(small, f"ck{i}") for i in range(4, 12)] + \
+            [(child, f"ck{i}") for i in range(4)] + [(small, None)]
+    est = lambda s: s.hours * 3600
+    shares = PL.assign_shards(cells, 2, est)
+    assert sorted(map(len, shares)) and sum(map(len, shares)) == len(cells)
+    for ck in [f"ck{i}" for i in range(4)]:                                   # parent and child together
+        assert len({i for i, sh in enumerate(shares) for s, c in sh if c == ck}) == 1
+    loads = [sum(est(s) for s, _ in sh) for sh in shares]
+    assert max(loads) - min(loads) <= 8 * 3600
+    assert PL.assign_shards(cells, 2, est) == shares                        # deterministic
+
+
+def test_coordinate_runs_one_step_per_node_and_counts_progress(tmp_path, monkeypatch):
+    from sidlens import paths
+    from sidlens.grid import pipeline as PL, registry
+    monkeypatch.setattr(registry, "load", lambda: _FakeRegistry())
+    monkeypatch.setattr(paths, "RESULTS", tmp_path)
+    monkeypatch.setenv("BATCH_GPUS", "8")
+    monkeypatch.setenv("SLURM_JOB_ID", "777")
+    g = PL.Spec("t/gpu", "ar", hours=1)
+    monkeypatch.setitem(PL.SPECS, g.name, g)
+    seen = {}
+
+    def fake_srun(cmd, cwd=None):
+        seen["cmd"] = cmd
+        shares = json.loads((tmp_path / "batch" / "shares-best-777.json").read_text())
+        for name, ck in shares[0]:                       # node 0 finishes its share, node 1 nothing
+            d = PL.cell_dir(PL.SPECS[name], ck)
+            d.mkdir(parents=True)
+            (d / "status.txt").write_text("complete exit=0 seconds=60")
+        return 0
+    res = PL.coordinate("best", ["t/gpu"], 2, 0, run=fake_srun)
+    cmd = " ".join(seen["cmd"])
+    assert cmd.startswith("srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --gres=gpu:8")
+    assert "batch --set best --worker --shares" in cmd and "--stage t/gpu" in cmd
+    assert res["done"] == 6 and res["left"] == 6
+
+
+def test_batch_stops_at_the_deadline_like_on_sigterm(tmp_path, monkeypatch):
+    PL, g, c, d = _batch_setup(tmp_path, monkeypatch)
+    res = PL.batch("best", ["t/gpu"], gpu_ids=["0", "1"], cpu_workers=0, poll=0.05, mem_gb=1000, seconds=1.5,
+                   launch=_fake_launch(sleep=60))
+    assert res["signal"] and res["done"] == 0 and res["left"] == 12
+    states = [PL._status(PL.cell_dir(g, ck)) for _, ck in PL.plan("best", ["t/gpu"])]
+    assert sum(st.startswith("interrupted") for st in states) == 2

@@ -53,3 +53,14 @@ the top 10. Primary: the change in new-target SID Hit@10 at alpha = 0.5.
 Scaling attention weights is not a model the run was trained as; values of
 alpha other than 1 are interventions, not settings. Intervals exclude
 training-seed variance.
+
+## Amendment 1 (2026-10-23, before any grid result)
+
+AR alphas rescore each row's returned SIDs in one forward pass instead of one
+SID at a time (`--rescore-batch 0`, `decode_ar.intervention_protocol`): six
+scaled decodes at the evaluator's setting take about 17 hours per run on an
+A100, and about 6 batched. V2a still runs at the evaluator's setting. Every
+alpha and the V3 baseline use the batched setting, so V3 compares like with
+like, and V2b reports how far batched rescoring moves alpha = 1 from the saved
+lists. DiffGRM is unchanged. `--rescore-batch 1` restores one-at-a-time
+rescoring.

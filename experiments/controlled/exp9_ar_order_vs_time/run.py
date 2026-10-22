@@ -153,7 +153,14 @@ def set_seed(seed: int) -> None:
 
 
 def part_d_grid(args, ckpt, gin, examples, st, tok, validation, log) -> None:
-    """Part D on a grid run: V-D0 against the run's saved lists, then the swap arm."""
+    """Part D on a grid run: V-D0 against the run's saved lists, then the clean and swap arms.
+
+    Amendment (2026-10-23, before any grid result): V-D0 decodes the first `--v2-rows`
+    rows in CSV order at the evaluator's settings and must reproduce their saved lists;
+    the clean and swap arms then decode every row with each row's candidates rescored in
+    one batch (`decode_ar.intervention_protocol`; `--rescore-batch 1` for one at a
+    time). Both arms use the same setting, and V-D1 reports the clean arm against the
+    saved lists (float noise of batched rescoring; not a gate)."""
     from sidlens.grid import decode_ar as DA, predictions as GP
     proto = GP.ar_protocol(gin.entry, require_full=not args.limit)
     if proto["batch_size"] != 1:
@@ -165,18 +172,26 @@ def part_d_grid(args, ckpt, gin, examples, st, tok, validation, log) -> None:
     torch.backends.cudnn.allow_tf32 = True
     order = sorted(range(len(examples)), key=lambda i: examples[i].row)      # the CSV's order
     exs = [examples[i] for i in order]
+    saved = GP.load(gin.entry)
+    cproto = DA.intervention_protocol(proto, args.rescore_batch)
+    validation["part_d_protocol"] = {"evaluator": proto, "arms": cproto, "v2_rows": args.v2_rows}
     t0 = time.time()
-    clean = DA.decode_rows(model, tok, grammar, exs, proto, log=log)
-    log(f"[D clean] {len(clean)} rows, {time.time() - t0:.0f}s")
-    v = GP.compare(clean, GP.load(gin.entry), "ar", only_saved=bool(args.limit))
+    check = DA.decode_rows(model, tok, grammar, exs[:args.v2_rows], proto, log=log)
+    v = GP.compare(check, saved, "ar", only_saved=bool(args.limit))
     validation["V_D0_grid_reproduction"] = v
-    log(f"[D] V-D0 {json.dumps({k: v[k] for k in ('rows', 'identical', 'tie_reordered', 'failed', 'ok')})}")
+    log(f"[D] V-D0 {json.dumps({k: v[k] for k in ('rows', 'identical', 'tie_reordered', 'failed', 'ok')})}"
+        f" {time.time() - t0:.0f}s")
     if not v["ok"]:
         raise RuntimeError("the clean decode does not reproduce the run's saved predictions; Part D stops")
+    t0 = time.time()
+    clean = DA.decode_rows(model, tok, grammar, exs, cproto, log=log)
+    log(f"[D clean] {len(clean)} rows, {time.time() - t0:.0f}s")
+    validation["V_D1_clean_arm_vs_saved"] = GP.compare(clean, saved, "ar", score_atol=1e-2, tie_atol=1e-2,
+                                                       max_tie_share=1.0, only_saved=bool(args.limit))
     elig = {examples[i].example_id for i in range(len(examples)) if st.eligible[i]}
     sw = [ex for ex in exs if ex.example_id in elig]
     t0 = time.time()
-    swap = DA.decode_rows(model, tok, grammar, [swap_last_two(ex) for ex in sw], proto, log=log)
+    swap = DA.decode_rows(model, tok, grammar, [swap_last_two(ex) for ex in sw], cproto, log=log)
     log(f"[D swap] {len(swap)} rows, {time.time() - t0:.0f}s")
     recs = []
     for ex in exs:
@@ -201,6 +216,9 @@ def main(argv=None) -> int:
     ap.add_argument("--parts", default="TF,D")
     ap.add_argument("--limit", type=int, default=None, help="first N rows (pilot only)")
     ap.add_argument("--rows", type=int, default=128)
+    ap.add_argument("--v2-rows", type=int, default=512, help="grid Part D: rows decoded for V-D0 (CSV order)")
+    ap.add_argument("--rescore-batch", type=int, default=0,
+                    help="grid Part D arms: candidates rescored per forward (0: all of a row's; 1: the evaluator's)")
     ap.add_argument("--device", default="cuda", help="grid runs: cpu runs float32 (smoke tests; bit-exact controls hold on GPU only)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)

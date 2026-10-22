@@ -18,8 +18,14 @@ V2a  the plain decoder reproduces the run's saved lists on the first
      run stops. `B_plain` is then the run's saved list for every row: it is
      exactly the plain decode, and decoding it again would add a fifth decode.
 V2b  B (the edit route with an empty plan) against B_plain: same lists up to
-     float noise of the explicit-mask kernel; reported, not a gate. Every
-     contrast is against B, so conditions differ only by their edges.
+     float noise of the explicit-mask kernel and of batched rescoring; reported,
+     not a gate. Every contrast is against B, so conditions differ only by
+     their edges.
+
+Amendment 3 (2026-10-23, before any grid result): the conditions rescore each
+row's candidates in one batch (`--rescore-batch 0`, `decode_ar.intervention_protocol`);
+V2a keeps the evaluator's one-at-a-time rescoring. `--rescore-batch 1` restores
+the evaluator's setting for the conditions too.
 
     python run_grid.py --ckpt 'grid:<key>@best' --out <new dir> [--limit 64]
 """
@@ -49,6 +55,8 @@ def main(argv=None) -> int:
     ap.add_argument("--ckpt", required=True, help="a next-item AR grid weight state (grid:<key>@best)")
     ap.add_argument("--conditions", default=",".join(CONDITIONS))
     ap.add_argument("--v2-rows", type=int, default=512, help="rows decoded plainly for V2a (CSV order)")
+    ap.add_argument("--rescore-batch", type=int, default=0,
+                    help="conditions: candidates rescored per forward (0: all of a row's; 1: the evaluator's)")
     ap.add_argument("--limit", type=int, default=None, help="first N rows in CSV order (pilot only)")
     ap.add_argument("--device", default="cuda", help="cpu runs float32 (smoke tests; bit-exact controls hold on GPU only)")
     ap.add_argument("--out", type=Path, required=True)
@@ -87,6 +95,7 @@ def main(argv=None) -> int:
     proto = GP.ar_protocol(gin.entry, require_full=not args.limit)
     if proto["batch_size"] != 1:
         raise RuntimeError("the run was evaluated in batches > 1; reproducing it needs its full row order")
+    cproto = DA.intervention_protocol(proto, args.rescore_batch)          # amendment 3
     saved = GP.load(gin.entry)
     missing = [e.example_id for e in examples if e.example_id not in saved]
     if missing and not args.limit:
@@ -110,7 +119,8 @@ def main(argv=None) -> int:
               "n_digits": n, "split": "test", "task": "next-item", "template": gin.template,
               "csv": str(gin.csv), "csv_sha256": hashing.sha256_file(gin.csv),
               "sid_index_sha256": gin.entry["sid_index"]["sha256"], "decoder": "onediffrec evaluate_ar_joint",
-              "protocol": proto, "n_rows": len(examples), "n_users": len({e.user_id for e in examples}),
+              "protocol": proto, "intervention_protocol": cproto,
+              "n_rows": len(examples), "n_users": len({e.user_id for e in examples}),
               "limited": args.limit, "conditions": conds, "v2_rows": args.v2_rows,
               "classes": rows.cls.value_counts().to_dict(), **gin.info}
     (args.out / "inputs.json").write_text(json.dumps(inputs, indent=1, default=str))
@@ -142,7 +152,7 @@ def main(argv=None) -> int:
 
     # ---- conditions ----------------------------------------------------------
     encoded = [P.encode(ex, tok, vocab, template=gin.template) for ex in examples]
-    lists, counts = DA.run_conditions(model, tok, grammar, examples, encoded, vocab, proto, conds, log=log)
+    lists, counts = DA.run_conditions(model, tok, grammar, examples, encoded, vocab, cproto, conds, log=log)
     for cond in conds:
         DA.lists_frame(lists[cond], examples, cond).to_parquet(args.out / f"predictions_{cond}.parquet", index=False)
     validation["V2b_edit_route_vs_plain"] = GP.compare(lists["B"], {k: {"predictions": v} for k, v in b_plain.items()},

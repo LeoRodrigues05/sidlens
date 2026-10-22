@@ -2,10 +2,10 @@
 
 Declared 2026-10-22, before any grid result. Code: `src/sidlens/grid/pipeline.py`
 (`Spec.paper`, `PAPER_CORE_MAPS`, `CASE_MAPS`); scripts:
-`scripts/grid/run_paper.sh`, `scripts/grid/run_case_study.sh`. It replaces
-`run_best_state.sh` as what the coauthor runs, because every experiment on
-every map (the best set) costs about 1,650 A100 GPU-hours at plan rates and
-about 4,400 with the grid's AR decoder as measured.
+`scripts/grid/run_quick.sh`, `scripts/grid/run_paper.sh`,
+`scripts/grid/run_case_study.sh`. It replaces `run_best_state.sh` as what the
+coauthor runs, because every experiment on every map (the best set) costs
+about 4,400 A100 GPU-hours with the grid's AR decoder as measured.
 
 ## Why these experiments go where they go
 
@@ -39,22 +39,46 @@ Outside the core, exp3 runs Part A only and exp4 runs R and K on the
 validation split only. Those cells record `scope: broad`; a later best-set run
 reruns them in full rather than counting them as complete.
 
-## Cost (A100 GPU-hours)
+## Cost
 
-Measured on 2026-10-22: the grid's AR decoder (50 beams, every beam rescored
-one at a time, as the run's evaluator did) takes 1.30 s per row, or 1.63 s
-with copy reads blocked. Batching each row's rescoring takes 0.37 and 0.51 s.
-DiffGRM minutes per cell are medians of our 20-checkpoint runs of 2026-10-14.
+The grid's AR decoder (50 beams, then raw-vocabulary rescoring of every
+returned SID) takes 1.30 s per row on an A100 when it rescores one SID per
+forward pass, as the runs' evaluator did, or 1.63 s with copy reads blocked
+(measured 2026-10-22). Rescoring a row's SIDs in one forward pass takes 0.37
+and 0.51 s. exp6, exp9 and N3 therefore rescore in one batch for their
+intervention decodes (protocol amendments of 2026-10-23); their reproduction
+gates still decode at the evaluator's setting. DiffGRM minutes per cell are
+medians of our 20-checkpoint runs of 2026-10-14.
 
-| Set | Cells | GPU-hours, evaluator's rescoring | GPU-hours, batched rescoring for interventions |
-|---|---|---|---|
-| Paper set | 3,307 | about 840 | about 490 |
-| Case study, after the paper set | 150 | about 290 | about 150 |
-| Best set (every experiment, every map) | 4,249 | about 4,400 | — |
+H200 hours divide A100 hours by 2-2.5 for batched forward passes, by 1.2-1.5
+for beam decoding and DiffGRM, and by 1.3 for the representation chain. These
+ratios are assumptions; the job's progress file measures the real ones.
 
-CPU work (about 70 CPU-hours) runs inside the same job on its CPU workers.
-Batched rescoring is not implemented; it would change the intervention decodes
-of exp6, exp9 and N3, and V2a would keep the evaluator's settings.
+| Set | GPU cells | A100 GPU-hours | H200 GPU-hours | 16 H200 (+25 %) | 8 H200 (+25 %) |
+|---|---|---|---|---|---|
+| Quick set | 553 | about 210 | 115-143 | 9.0-11.2 h | 18-22 h |
+| Paper set | 1,019 | about 480 | 274-330 | 21-26 h | 43-52 h |
+
+CPU cells (about 70 CPU-hours at 16 threads) run beside the GPU cells on
+`BATCH_CPU_WORKERS` workers per node.
+
+## The quick set
+
+`run_quick.sh` runs the paper set cut to one test per claim, sized to 8-14
+hours on 16 H200s (two 8-GPU nodes, `BATCH_NODES=2`). It is a subset of the
+paper set: `run_paper.sh` afterwards skips every finished cell, except that
+the core maps' exp3 and exp4 cells, which the quick set runs with fewer parts,
+are rerun with all of them.
+
+| Group | Experiments |
+|---|---|
+| Every map | Saved-list analyses with target classes and N4 (all 432 runs); AR exp3 Part A, exp4 R and K on the validation split, exp10; DiffGRM exp7, exp8, exp12 (CPU) and exp14 |
+| Core maps | AR exp6 (and retrospective exp7), N1 (both paradigms); DiffGRM exp13, representation exp5 |
+| Native core maps | AR exp9, exp5 (next-two runs) |
+| Once | N2 (f) |
+
+Left for the paper set: exp3 Part B, exp4 Part H and the test split, N2, N3,
+the AR representation chain, DiffGRM exp1, exp2 and representation exp4.
 
 ## The case study (optional)
 

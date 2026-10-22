@@ -203,3 +203,29 @@ are re-run as a separate job, and nothing else changes. The job-283114
 **Disclosure.** This re-run happens after the primary estimands (P1–P3 on
 `C_all`/`C_later`/`N_later`) were seen. The plain decoder is a secondary,
 declared before any run, and its design is unchanged.
+
+## Amendment 3 (2026-10-23, grid runs, before any grid result)
+
+**The setting.** On the OneDiffRec grid, exp6 decodes with each run's own
+evaluator (`run_grid.py`, `sidlens.grid.decode_ar`): constrained beam search
+at 50 beams, then raw-vocabulary rescoring of every returned SID, one SID per
+forward pass. Measured on an A100, that takes 1.30 s per row, or 1.63 s with
+the copy reads blocked. Four decodes of 6,297 rows then take about 11 hours
+per run.
+
+**The change.** The four conditions (B, C_later, C_all, N_later) rescore each
+row's returned SIDs in one forward pass (`--rescore-batch 0`,
+`decode_ar.intervention_protocol`): 0.37 s per row, or 0.51 s with the block.
+The candidates are the same; padding them together changes float rounding.
+
+**What stays.** V2a decodes the first 512 rows at the evaluator's setting and
+must reproduce their saved lists, as before. Every condition uses the same
+batched setting, so each contrast against B still differs only by the blocked
+edges. V2b now also reports how far batched rescoring moves B from the saved
+lists. `--rescore-batch 1` restores one-at-a-time rescoring for the
+conditions.
+
+**Check before use.** On 64 rows of the validation fixture at 50 beams, batched
+and one-at-a-time rescoring are compared for the plain decode and for C_all:
+identical lists, same SIDs in another order, and the largest score gap
+(`scratch/grid-validation/rescore_equiv.py`).

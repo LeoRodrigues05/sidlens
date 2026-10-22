@@ -54,11 +54,13 @@ lines of `~/.config/sidlens/grid.env`:
 | Variable | Meaning |
 |---|---|
 | `SLURM_PARTITION`, `SLURM_ACCOUNT`, `SLURM_QOS`, `SLURM_EXCLUDE` | the GPU partition and its settings (the names OneDiffRec's scripts use) |
-| `BATCH_GPUS` | GPUs on one node (default 8); the job uses one node |
+| `BATCH_NODES` | nodes for the job (default 1); 2 for 16 GPUs on 8-GPU nodes |
+| `BATCH_GPUS` | GPUs per node (default 8) |
 | `GPU_TYPE` | a GPU type, if your `--gres` needs one (e.g. `h200`) |
 | `BATCH_CPUS`, `BATCH_MEM` | cores and memory for the job (defaults 64 and `0`, all of the node's memory; set a size such as `1000G` if the cluster refuses `0`) |
 | `BATCH_TIME` | the longest time your partition allows (default `2-00:00:00`) |
-| `BATCH_CPU_WORKERS` | CPU cells run beside the GPU cells (default 4) |
+| `BATCH_CPU_WORKERS` | CPU cells run beside the GPU cells, per node (default 4; 8 on a 96-core node) |
+| `BATCH_MARGIN_MIN` | minutes before the job's end at which it stops cells and queues the next job (default 15) |
 
 If `grid.env` was written before 2026-10-22, it lacks the `BATCH_*` lines; add
 them by hand (or rerun `setup`, which backs up the old file).
@@ -80,13 +82,17 @@ registry exists.
 ## 5. Run: one job
 
 ```bash
-bash scripts/grid/run_paper.sh --dry-run      # the plan, and exactly one sbatch line
-bash scripts/grid/run_paper.sh
+bash scripts/grid/run_quick.sh --dry-run      # the plan, and exactly one sbatch line
+bash scripts/grid/run_quick.sh                # the quick set: 9-11 h on 16 H200s
+bash scripts/grid/run_paper.sh                # afterwards: the rest of the paper set
 ```
 
-This queues **one** Slurm job on one node. Inside it, every cell of the paper
-set (`docs/plans/GRID_PAPER_SET.md`) runs as its own process: one cell per GPU
-at a time and `BATCH_CPU_WORKERS` CPU cells beside them. The job starts with
+Each script queues **one** Slurm job, on `BATCH_NODES` nodes. Inside it, every
+cell of the set (`docs/plans/GRID_PAPER_SET.md`) runs as its own process: one
+cell per GPU at a time and `BATCH_CPU_WORKERS` CPU cells beside them on each
+node. With several nodes, the job splits the cells between them and runs one
+worker per node as a job step (`srun`); nothing else is queued. The quick set
+is part of the paper set, so `run_paper.sh` skips what the quick set finished. The job starts with
 one cell of every experiment, so a broken experiment shows up in its first
 hour. When its time runs out it stops the running cells (marked `interrupted`,
 not failed), queues its successor and ends; there is never more than one job
@@ -96,18 +102,21 @@ writes the summaries and the export tarball (step 6).
 
 Progress, updated after every cell:
 
-- `results_remote/batch/progress-paper-<job>.json`: per experiment, cells
+- `results_remote/batch/progress-<set>-<job>.json` (one node) or
+  `progress-<set>-<job>-node<k>.json` (one per node): per experiment, cells
   done, failed and left, median minutes per cell, and GPU-hours left. **Send
-  us this file after the first three or four hours**: it is the cost estimate.
-- `results_remote/provenance/slurm/sidlens-paper-<job>.out`: the job's log.
-- `bash scripts/grid/sidlens-grid.sh status --set paper`: complete, failed and
+  us these files after the first two or three hours**: they are the cost
+  estimate.
+- `results_remote/provenance/slurm/sidlens-<set>-<job>.out`: the job's log.
+- `bash scripts/grid/sidlens-grid.sh status --set <set>`: complete, failed and
   missing cells per experiment.
 - A failed cell's `pipeline.log` (in its results folder) has the command and
   the error; `results_remote/batch/logs/` holds each cell's console output.
 
-To stop: `scancel <job>`. To resume: run `run_paper.sh` again; finished cells
-are skipped. If the job could not queue its successor (for example, `sbatch`
-does not work on compute nodes), its log says so: run `run_paper.sh` again.
+To stop: `scancel <job>`. To resume: run the same script again; finished
+cells are skipped. If the job could not queue its successor (for example,
+`sbatch` does not work on compute nodes), its log says so: run the script
+again.
 
 Other sets, each also one job: `run_case_study.sh` (optional, when we ask:
 every experiment on the native 3x256 and 4x256 maps of each quantizer, plus

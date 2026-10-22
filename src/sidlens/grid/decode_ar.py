@@ -259,6 +259,24 @@ def decode(model, tokenizer, grammar, prompts, num_beams=50, top_k=20, score_bat
     return [sorted(cands, key=lambda c: (-c["joint_logprob"], c["sids"]))[:top_k] for cands in by_example]
 
 
+def intervention_protocol(proto: dict, rescore_batch: int = 0) -> dict:
+    """The run's protocol for an experiment's intervention decodes: its beams, list length and
+    batch size, with each row's returned candidates rescored `rescore_batch` at a time (0: all
+    of them in one forward, at most `num_beams`; 1: the evaluator's own setting).
+
+    Amendment of 2026-10-23 for exp6, exp9 and N3 on the grid, before any grid result: the
+    evaluator rescores one candidate at a time, which is most of a decode at 50 beams (A100:
+    1.30 s per row, or 1.63 s with copy reads blocked, against 0.37 / 0.51 s batched).
+    Batching right-pads the candidates of one row together; it changes float rounding, not
+    which candidates are scored. Every condition of an experiment uses the same setting, so
+    contrasts stay clean, and each experiment's reproduction gate (V2a, V-D0) still decodes
+    at the evaluator's setting, where the saved lists are reproduced exactly."""
+    if rescore_batch < 0:
+        raise ValueError("rescore_batch is 0 (all candidates of a row) or a positive batch size")
+    return {**proto, "score_batch_size": int(rescore_batch or proto["num_beams"]),
+            "evaluator_score_batch_size": proto["score_batch_size"]}
+
+
 def late_layers(model) -> tuple[int, ...]:
     """The later half of the layers, where exp4 found every copy read (14-27 of 28)."""
     n = model.config.num_hidden_layers

@@ -184,3 +184,20 @@ Pilot job 287179 ran 64 test rows per cell, parts TF and D.
 `summarize.py` was run on the pilot to test it. Only its shape and NaN checks
 were printed, and no estimate was read. Nothing in the design changed after
 the pilot.
+
+## Amendment (2026-10-23, grid runs, before any grid result)
+
+On the grid, Part D's clean decode of every row doubled as V-D0 and was run at
+the evaluator's setting: 50 beams with every returned SID rescored in its own
+forward pass, 1.30 s per row on an A100. Part D now runs:
+
+1. **V-D0:** the first 512 rows in CSV order at the evaluator's setting; they
+   must reproduce their saved lists, or Part D stops.
+2. **The clean and swap arms:** every row, with each row's returned SIDs
+   rescored in one forward pass (`--rescore-batch 0`,
+   `decode_ar.intervention_protocol`; 0.37 s per row). Both arms use the same
+   setting, so the swap contrast is unchanged in kind.
+3. **V-D1 (reported, not a gate):** the clean arm against the saved lists, with
+   the tolerances of exp6's V2b.
+
+`--rescore-batch 1` restores one-at-a-time rescoring for both arms.

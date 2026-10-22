@@ -4,16 +4,16 @@
 #   bash scripts/grid/sidlens-grid.sh setup --onediffrec-work <WORK_ROOT> [--sidlens-work DIR] [--python PY]
 #   bash scripts/grid/sidlens-grid.sh register      # runs and weight states found; anything missing or failed
 #   bash scripts/grid/sidlens-grid.sh pilot         # one short cell per experiment, timed (run on a GPU node)
-#   bash scripts/grid/sidlens-grid.sh plan  [--set best|full|paper|case]
-#   bash scripts/grid/sidlens-grid.sh run   [--set best|full|paper|case] [--stage ...] [--dry-run]   # ONE job
-#   bash scripts/grid/sidlens-grid.sh status [--set best|full|paper|case]
+#   bash scripts/grid/sidlens-grid.sh plan  [--set best|full|paper|case|quick]
+#   bash scripts/grid/sidlens-grid.sh run   [--set best|full|paper|case|quick] [--stage ...] [--dry-run]   # ONE job
+#   bash scripts/grid/sidlens-grid.sh status [--set best|full|paper|case|quick]
 #   bash scripts/grid/sidlens-grid.sh summarize
 #   bash scripts/grid/sidlens-grid.sh export        # packs results_remote/ with a hash manifest
 #
 # Settings live in ~/.config/sidlens/grid.env (written by setup; edit the Slurm
 # lines there): SLURM_PARTITION, SLURM_ACCOUNT, SLURM_QOS, SLURM_EXCLUDE,
-# CPU_PARTITION, CPU_QOS, GPU_TYPE; the one job: BATCH_GPUS, BATCH_CPUS, BATCH_MEM,
-# BATCH_TIME, BATCH_CPU_WORKERS (run --arrays only: GPU_GRES, MAX_GPUS, MAX_CPUS, CELLS_PER_TASK).
+# CPU_PARTITION, CPU_QOS, GPU_TYPE; the one job: BATCH_NODES, BATCH_GPUS (per node),
+# BATCH_CPUS, BATCH_MEM, BATCH_TIME, BATCH_CPU_WORKERS, BATCH_MARGIN_MIN (run --arrays only: GPU_GRES, MAX_GPUS, MAX_CPUS, CELLS_PER_TASK).
 # Runbook: docs/clusters/GRID_RUNBOOK.md.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,14 +71,17 @@ export GPU_GRES=\${GPU_GRES:-gpu:1}
 export MAX_GPUS=\${MAX_GPUS:-16}
 export MAX_CPUS=\${MAX_CPUS:-32}
 export CELLS_PER_TASK=\${CELLS_PER_TASK:-1}
-# One job (what run_*.sh queue): one node with these resources; it requeues itself.
-# BATCH_MEM=0 asks for all of the node's memory; set a size if the cluster refuses it.
+# One job (what run_*.sh queue): BATCH_NODES nodes, each with these resources; it
+# requeues itself. BATCH_MEM=0 asks for all of a node's memory; set a size if the
+# cluster refuses it.
+export BATCH_NODES=\${BATCH_NODES:-1}
 export BATCH_GPUS=\${BATCH_GPUS:-8}
 export GPU_TYPE=\${GPU_TYPE:-}
 export BATCH_CPUS=\${BATCH_CPUS:-64}
 export BATCH_MEM=\${BATCH_MEM:-0}
 export BATCH_TIME=\${BATCH_TIME:-2-00:00:00}
 export BATCH_CPU_WORKERS=\${BATCH_CPU_WORKERS:-4}
+export BATCH_MARGIN_MIN=\${BATCH_MARGIN_MIN:-15}
 ENV
     echo "[setup] wrote ${GRID_ENV}"
     source "${GRID_ENV}"
